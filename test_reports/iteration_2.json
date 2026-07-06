@@ -1,0 +1,42 @@
+{
+  "summary": "Frontend-only E2E of Chronicle sidebar/custom-types changes on the preview URL. All 8 acceptance scenarios pass: 'New' dropdown lists (Untyped, built-ins, Add type…, Import chat…); Untyped creation increments untyped+all only; custom type 'Recipe' creation appears in sidebar and dropdown, opens a Recipe object, count increments on repeated creates; persists across reload; type-select lists Untyped + built-ins + Recipe and moves between counters; deletion of the custom type removes the nav row and does not crash; regression Note create/autosave/delete works. Two minor deviations from the spec were observed on 'orphaned' objects after their custom type is removed — see minor issues.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ObjectDetail type-select",
+        "issue": "After deleting a custom type, an existing object whose stored type equals the removed key renders its type-select trigger with an EMPTY label (no text). The list icon does correctly fall back to CircleDashed/Untyped, but the Select's <SelectValue/> is empty because the underlying value is still the (now-unknown) key 'recipe' and there is no matching SelectItem. Spec says orphans should 'fall back to showing as Untyped icon/label'. Suggestion: in ObjectDetail, when meta === UNTYPED but type !== null, set Select value to 'untyped' (or render label='Untyped' explicitly).",
+        "selector": "[data-testid='type-select']",
+        "priority": "LOW"
+      },
+      {
+        "component": "Sidebar counters (ObjectRepository.counts())",
+        "issue": "Orphaned objects (whose type key was a custom type that has since been removed) are NOT counted under 'Untyped'. counts() still increments counts[o.type] using the stale key, so those objects only show under 'All objects' and are effectively hidden from every type filter (Untyped view shows 0 rows). Suggestion: in counts() / list(), treat any type key not in getValidTypeKeys() as untyped so it appears in the Untyped nav row.",
+        "selector": "[data-testid='nav-untyped']",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_2.json"],
+  "action_items": [
+    "(Optional) In ObjectDetail Select, coerce unknown/removed type keys to 'untyped' so the trigger shows the 'Untyped' label after a custom type is deleted.",
+    "(Optional) In ObjectRepository.counts() and list(filter.type='untyped'), treat any stored type key that is no longer in getValidTypeKeys() as untyped, so orphans show up in the Untyped nav row and count."
+  ],
+  "critical_code_review_comments": [
+    "Sidebar.jsx already correctly filters 'chat' out of the New dropdown but still renders it as a nav row — consistent with prior behavior.",
+    "typeRegistry.addCustomType uniqueness loop appends '-2', '-3' etc. — good, but the returned key is what the caller must use for testids/nav. Confirmed with slug 'Recipe' -> 'recipe'.",
+    "AddTypeDialog: onCreated triggers App.js setView(type.key) + createNew(type.key). Because createNew calls refresh() before setSelectedId, and the sidebar/nav rebuilds via useTypes on the 'chronicle-types-changed' event fired by save(), there is no race here in practice — verified count went 0→1 immediately after Create.",
+    "ObjectRepository.counts() does not defensively fold unknown/removed type keys into 'untyped', which surfaces as the minor bugs above.",
+    "ObjectDetail Select value = type || 'untyped' — does not defend against 'type is a string but not in allTypes' (removed custom type). Same minor bug root cause."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (skipped per request)", "frontend": "100% acceptance (8/8), 2 minor observations on orphan fallback" },
+  "test_credentials": "N/A — local-first app, no auth",
+  "seed_data_creation": "Playwright created transient IndexedDB objects and a 'Recipe' custom type in the automated browser session. IndexedDB and localStorage were reset at the start of the run. No shared/production data affected.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All 8 acceptance scenarios in the review_request pass on the preview URL. The two minor observations concern the 'orphan' case (deleting a custom type while objects of that type still exist): icon falls back to Untyped as required, but (a) ObjectDetail's type-select trigger shows an empty label, and (b) the Untyped sidebar counter does not include orphaned objects (they are only visible in 'All objects'). Neither causes a crash. ERR_CONNECTION_REFUSED on http://127.0.0.1:4577/api/inbox is expected in preview (local extension server absent).",
+  "rca of the issue": "Orphan-label bug: <Select value={type || 'untyped'}> — when type is a stale key like 'recipe' after its custom type was deleted, no <SelectItem value='recipe'> exists so <SelectValue/> renders empty. Orphan-counter bug: ObjectRepository.counts() does counts[o.type] += 1 without checking getValidTypeKeys().has(o.type); it should route unknown keys into counts.untyped. Same coercion should be applied in list({ type: 'untyped' }) so orphans surface in the Untyped view."
+}

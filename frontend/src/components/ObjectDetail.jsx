@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Trash2, Check, Loader2, Link2, ExternalLink } from "lucide-react";
 import { objectRepository } from "@/repositories";
 import { AIService, keywordTags } from "@/services/AIService";
-import { typeMeta, OBJECT_TYPES } from "@/lib/objectTypes";
+import { typeMeta } from "@/lib/objectTypes";
+import { useTypes } from "@/hooks/useTypes";
 import { fmtDate } from "@/lib/format";
 import { TagEditor } from "@/components/TagEditor";
 import {
@@ -16,6 +17,7 @@ import {
 const providerLabel = { claude: "Claude", chatgpt: "ChatGPT", gemini: "Gemini" };
 
 export function ObjectDetail({ object, onSaved, onDelete }) {
+  const allTypes = useTypes();
   const [title, setTitle] = useState(object.title);
   const [content, setContent] = useState(object.content);
   const [tags, setTags] = useState(object.tags || []);
@@ -88,7 +90,7 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
               <SelectItem value="untyped" data-testid="type-option-untyped">
                 Untyped
               </SelectItem>
-              {OBJECT_TYPES.map((t) => (
+              {allTypes.map((t) => (
                 <SelectItem key={t.key} value={t.key} data-testid={`type-option-${t.key}`}>
                   {t.singular}
                 </SelectItem>

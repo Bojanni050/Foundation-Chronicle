@@ -10,6 +10,7 @@ import {
   CircleDashed,
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
+import { useTypes } from "@/hooks/useTypes";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,11 +48,14 @@ export function Sidebar({
   onSelectView,
   onNew,
   onImport,
+  onAddType,
   onSearch,
   onPulse,
   onSettings,
   workspaceName,
 }) {
+  const allTypes = useTypes();
+  const customTypes = allTypes.filter((t) => t.isCustom);
   return (
     <aside className="flex h-full w-[264px] shrink-0 flex-col border-r border-border bg-background/60">
       {/* brand */}
@@ -71,11 +75,16 @@ export function Sidebar({
               className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-ink hover:bg-accent/60 transition-colors"
             >
               <Plus className="w-[18px] h-[18px] text-primary" strokeWidth={2} />
-              <span className="flex-1 text-left">New object</span>
+              <span className="flex-1 text-left">New</span>
               <kbd className="text-[11px] text-muted-foreground/60">⌘N</kbd>
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-52">
+            <DropdownMenuItem data-testid="new-menu-untyped" onClick={() => onNew(null)}>
+              <CircleDashed className="w-4 h-4 mr-2 text-muted-foreground" strokeWidth={1.75} />
+              New Untyped
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             {OBJECT_TYPES.filter((t) => t.key !== "chat").map((t) => (
               <DropdownMenuItem
                 key={t.key}
@@ -86,7 +95,22 @@ export function Sidebar({
                 New {t.singular}
               </DropdownMenuItem>
             ))}
+            {customTypes.length > 0 && <DropdownMenuSeparator />}
+            {customTypes.map((t) => (
+              <DropdownMenuItem
+                key={t.key}
+                data-testid={`new-menu-${t.key}`}
+                onClick={() => onNew(t.key)}
+              >
+                <t.icon className="w-4 h-4 mr-2 text-primary/80" strokeWidth={1.75} />
+                New {t.singular}
+              </DropdownMenuItem>
+            ))}
             <DropdownMenuSeparator />
+            <DropdownMenuItem data-testid="new-menu-add-type" onClick={onAddType}>
+              <Plus className="w-4 h-4 mr-2 text-primary" strokeWidth={1.75} />
+              Add type…
+            </DropdownMenuItem>
             <DropdownMenuItem data-testid="new-menu-import" onClick={onImport}>
               <Upload className="w-4 h-4 mr-2 text-primary" strokeWidth={1.75} />
               Import chat…
@@ -122,6 +146,17 @@ export function Sidebar({
 
       <nav className="flex-1 overflow-y-auto px-3 no-scrollbar">
         {OBJECT_TYPES.map((t) => (
+          <NavRow
+            key={t.key}
+            icon={t.icon}
+            label={t.label}
+            count={counts[t.key] || 0}
+            active={view === t.key}
+            onClick={() => onSelectView(t.key)}
+            testId={`nav-${t.key}`}
+          />
+        ))}
+        {customTypes.map((t) => (
           <NavRow
             key={t.key}
             icon={t.icon}

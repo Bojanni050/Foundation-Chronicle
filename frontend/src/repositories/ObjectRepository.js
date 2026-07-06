@@ -1,4 +1,5 @@
 import { getDB, OBJECT_STORE } from "@/lib/db";
+import { getValidTypeKeys } from "@/lib/typeRegistry";
 
 function uid() {
   return (
@@ -17,15 +18,11 @@ function fuzzyMatch(query, text) {
   return qi === query.length;
 }
 
-// Valid object types. Type is OPTIONAL: an item may be saved without a type
-// (stored as null). But IF a type is provided, it must be one of these.
-export const VALID_TYPES = new Set([
-  "note", "person", "task", "idea", "book", "project", "meeting", "dailyLog", "chat",
-]);
-
+// Type is OPTIONAL: an item may be saved without a type (stored as null).
+// But IF a type is provided, it must be a known built-in or custom type.
 function validateType(type) {
   if (type === undefined || type === null || type === "") return null;
-  if (!VALID_TYPES.has(type)) {
+  if (!getValidTypeKeys().has(type)) {
     throw new Error(`Invalid object type: "${type}"`);
   }
   return type;

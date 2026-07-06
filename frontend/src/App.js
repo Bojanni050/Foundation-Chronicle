@@ -13,6 +13,7 @@ import { SearchDialog } from "@/components/dialogs/SearchDialog";
 import { ImportChatDialog } from "@/components/dialogs/ImportChatDialog";
 import { SettingsDialog } from "@/components/dialogs/SettingsDialog";
 import { PulseDialog } from "@/components/dialogs/PulseDialog";
+import { AddTypeDialog } from "@/components/dialogs/AddTypeDialog";
 
 export default function App() {
   const [view, setView] = useState("all");
@@ -23,7 +24,7 @@ export default function App() {
   const [workspaceName, setWorkspaceName] = useState(getSettings().workspaceName);
   const [syncing, setSyncing] = useState(false);
 
-  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false });
+  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, addType: false });
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -145,6 +146,7 @@ export default function App() {
         onSelectView={(v) => { setView(v); setSelectedId(null); }}
         onNew={createNew}
         onImport={() => setDlg((d) => ({ ...d, import: true }))}
+        onAddType={() => setDlg((d) => ({ ...d, addType: true }))}
         onSearch={() => setDlg((d) => ({ ...d, search: true }))}
         onPulse={() => setDlg((d) => ({ ...d, pulse: true }))}
         onSettings={() => setDlg((d) => ({ ...d, settings: true }))}
@@ -192,6 +194,11 @@ export default function App() {
       />
       <SettingsDialog open={dlg.settings} onOpenChange={(v) => setDlg((d) => ({ ...d, settings: v }))} />
       <PulseDialog open={dlg.pulse} onOpenChange={(v) => setDlg((d) => ({ ...d, pulse: v }))} />
+      <AddTypeDialog
+        open={dlg.addType}
+        onOpenChange={(v) => setDlg((d) => ({ ...d, addType: v }))}
+        onCreated={(type) => { setView(type.key); createNew(type.key); }}
+      />
 
       <Toaster position="bottom-center" theme="light" toastOptions={{ style: { background: "hsl(30 12% 22%)", color: "hsl(36 33% 97%)", border: "none" } }} />
     </div>
