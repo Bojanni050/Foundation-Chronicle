@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        /* Chronicle warm theme */
+        --background: 36 33% 97%;        /* #FAF8F5 cream */
+        --foreground: 30 10% 16%;        /* warm near-black */
+        --card: 40 40% 99%;
+        --card-foreground: 30 10% 16%;
+        --popover: 40 40% 99%;
+        --popover-foreground: 30 10% 16%;
+        --primary: 24 72% 63%;           /* #E8935B muted orange */
+        --primary-foreground: 40 40% 99%;
+        --secondary: 34 22% 93%;
+        --secondary-foreground: 30 10% 20%;
+        --muted: 34 20% 94%;
+        --muted-foreground: 33 8% 48%;   /* muted gray-brown */
+        --accent: 28 45% 92%;            /* soft peach */
+        --accent-foreground: 24 40% 30%;
+        --destructive: 6 68% 55%;
+        --destructive-foreground: 40 40% 99%;
+        --border: 34 18% 88%;            /* thin warm border */
+        --input: 34 18% 88%;
+        --ring: 24 72% 63%;
+        --radius: 0.75rem;
+        --ink: 30 12% 22%;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        margin: 0;
+        @apply bg-background text-foreground;
+        font-family: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        font-feature-settings: "cv02", "cv03", "cv04";
+    }
+    h1, h2, h3, .font-serif {
+        font-family: "Fraunces", Georgia, serif;
+    }
+    ::selection {
+        background: hsl(24 72% 63% / 0.25);
+    }
+}
+
+@layer utilities {
+    .warm-blob {
+        background:
+            radial-gradient(120% 90% at 30% 20%, hsl(28 80% 90%) 0%, transparent 55%),
+            radial-gradient(120% 100% at 80% 90%, hsl(20 78% 82%) 0%, transparent 60%),
+            linear-gradient(135deg, hsl(30 60% 94%), hsl(24 70% 88%));
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .fade-in { animation: fadeIn 0.4s ease both; }
+    .rise-in { animation: riseIn 0.45s cubic-bezier(0.16,1,0.3,1) both; }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes riseIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* thin custom scrollbar */
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: hsl(33 12% 82%); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+@layer base {
+    [data-debug-wrapper="true"] { display: contents !important; }
+}

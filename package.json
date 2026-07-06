@@ -1,0 +1,11 @@
+{
+  "name": "chronicle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chronicle — a calm, local-first personal knowledge app.",
+  "scripts": {
+    "dev": "cd frontend && yarn start",
+    "server": "cd server && node index.js",
+    "install:all": "cd frontend && yarn install && cd ../server && npm install"
+  }
+}

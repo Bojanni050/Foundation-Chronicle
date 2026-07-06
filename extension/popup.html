@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { --bg:#FAF8F5; --ink:#2b2925; --muted:#8a857d; --accent:#E8935B; --border:#e7e2da; }
+      * { box-sizing: border-box; font-family: "Hanken Grotesk", -apple-system, system-ui, sans-serif; }
+      body { width: 320px; margin: 0; background: var(--bg); color: var(--ink); padding: 16px; }
+      h1 { font-size: 15px; margin: 0 0 2px; display:flex; align-items:center; gap:6px; }
+      .sub { font-size: 11px; color: var(--muted); margin: 0 0 14px; }
+      label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); display:block; margin: 10px 0 4px; }
+      input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background:#fff; font-size: 13px; color: var(--ink); }
+      button { width: 100%; margin-top: 12px; padding: 10px; border: 0; border-radius: 8px; background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 600; cursor: pointer; }
+      button.secondary { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+      button:disabled { opacity: .5; cursor: default; }
+      .send { background: var(--accent); }
+      .status { margin-top: 12px; font-size: 12px; padding: 8px 10px; border-radius: 8px; display: none; }
+      .status.ok { display:block; background: #e9f6ee; color: #1f7a44; }
+      .status.err { display:block; background: #fdecea; color: #b23b2e; }
+      .status.info { display:block; background: #f4efe8; color: var(--muted); }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display:inline-block; }
+      .row { display:flex; justify-content: space-between; align-items:center; }
+      .link { font-size: 11px; color: var(--accent); cursor: pointer; background:none; border:0; width:auto; margin:0; padding:0; }
+    </style>
+  </head>
+  <body>
+    <h1><span class="dot"></span> Chronicle</h1>
+    <p class="sub">Send AI chats to your local stack.</p>
+
+    <div id="setup" style="display:none">
+      <label>Local API URL</label>
+      <input id="apiUrl" placeholder="http://127.0.0.1:4577" />
+      <label>API Token</label>
+      <input id="token" placeholder="paste token from Chronicle Settings" />
+      <button id="save">Save settings</button>
+    </div>
+
+    <div id="main" style="display:none">
+      <div class="row">
+        <span style="font-size:12px;color:var(--muted)" id="pageInfo">Detecting page…</span>
+        <button class="link" id="editSettings">settings</button>
+      </div>
+      <button class="send" id="send">Send this chat to Chronicle</button>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

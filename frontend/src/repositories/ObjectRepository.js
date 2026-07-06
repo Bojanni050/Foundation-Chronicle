@@ -1,0 +1,124 @@
+import { getDB, OBJECT_STORE } from "@/lib/db";
+
+function uid() {
+  return (
+    "obj_" +
+    Date.now().toString(36) +
+    "_" +
+    Math.random().toString(36).slice(2, 8)
+  );
+}
+
+function fuzzyMatch(query, text) {
+  let qi = 0;
+  for (let i = 0; i < text.length && qi < query.length; i++) {
+    if (text[i] === query[qi]) qi++;
+  }
+  return qi === query.length;
+}
+
+/**
+ * Abstract repository contract. Any backend (IndexedDB now, a local
+ * PostgreSQL-backed API later) must implement these methods with the same
+ * shapes. UI code depends ONLY on this contract, never on the implementation.
+ */
+export class ObjectRepository {
+  async create(_data) { throw new Error("not implemented"); }
+  async getById(_id) { throw new Error("not implemented"); }
+  async list(_filter) { throw new Error("not implemented"); }
+  async update(_id, _patch) { throw new Error("not implemented"); }
+  async delete(_id) { throw new Error("not implemented"); }
+  async search(_query) { throw new Error("not implemented"); }
+  async counts() { throw new Error("not implemented"); }
+}
+
+export class IndexedDBObjectRepository extends ObjectRepository {
+  async create(data = {}) {
+    const now = new Date().toISOString();
+    const obj = {
+      id: data.id || uid(),
+      type: data.type || "note",
+      title: data.title || "Untitled",
+      content: data.content || "",
+      tags: Array.isArray(data.tags) ? data.tags : [],
+      source: data.source || "manual",
+      sourceProvider: data.sourceProvider || null,
+      sourceUrl: data.sourceUrl || null,
+      links: Array.isArray(data.links) ? data.links : [],
+      createdAt: data.createdAt || now,
+      updatedAt: now,
+    };
+    const db = await getDB();
+    await db.put(OBJECT_STORE, obj);
+    return obj;
+  }
+
+  async getById(id) {
+    const db = await getDB();
+    return (await db.get(OBJECT_STORE, id)) || null;
+  }
+
+  async list(filter = {}) {
+    const db = await getDB();
+    let all = await db.getAll(OBJECT_STORE);
+    if (filter.type && filter.type !== "all") {
+      all = all.filter((o) => o.type === filter.type);
+    }
+    all.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+    return all;
+  }
+
+  async update(id, patch = {}) {
+    const db = await getDB();
+    const existing = await db.get(OBJECT_STORE, id);
+    if (!existing) return null;
+    const updated = {
+      ...existing,
+      ...patch,
+      id,
+      createdAt: existing.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+    await db.put(OBJECT_STORE, updated);
+    return updated;
+  }
+
+  async delete(id) {
+    const db = await getDB();
+    await db.delete(OBJECT_STORE, id);
+    return true;
+  }
+
+  async search(query) {
+    const db = await getDB();
+    const all = await db.getAll(OBJECT_STORE);
+    if (!query || !query.trim()) {
+      return all.sort((a, b) =>
+        (b.updatedAt || "").localeCompare(a.updatedAt || "")
+      );
+    }
+    const q = query.toLowerCase().trim();
+    const scored = all
+      .map((o) => {
+        const title = (o.title || "").toLowerCase();
+        const tags = (o.tags || []).join(" ").toLowerCase();
+        const hay = [title, (o.content || "").toLowerCase(), tags, (o.sourceProvider || "").toLowerCase()].join(" ");
+        let score = 0;
+        if (title.includes(q)) score += 5;
+        if (tags.includes(q)) score += 3;
+        if (hay.includes(q)) score += 1;
+        if (score === 0 && fuzzyMatch(q, hay)) score += 0.5;
+        return { o, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score);
+    return scored.map((x) => x.o);
+  }
+
+  async counts() {
+    const all = await this.list();
+    const counts = { all: all.length };
+    for (const o of all) counts[o.type] = (counts[o.type] || 0) + 1;
+    return counts;
+  }
+}

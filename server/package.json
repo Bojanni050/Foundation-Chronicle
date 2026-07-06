@@ -1,0 +1,14 @@
+{
+  "name": "chronicle-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chronicle local API server — localhost-only inbox queue for the browser extension pipeline.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}
