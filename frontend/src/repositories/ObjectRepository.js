@@ -74,7 +74,8 @@ export class IndexedDBObjectRepository extends ObjectRepository {
     let all = await db.getAll(OBJECT_STORE);
     if (filter.type && filter.type !== "all") {
       if (filter.type === "untyped") {
-        all = all.filter((o) => !o.type);
+        const valid = getValidTypeKeys();
+        all = all.filter((o) => !o.type || !valid.has(o.type));
       } else {
         all = all.filter((o) => o.type === filter.type);
       }
@@ -134,9 +135,10 @@ export class IndexedDBObjectRepository extends ObjectRepository {
 
   async counts() {
     const all = await this.list();
+    const valid = getValidTypeKeys();
     const counts = { all: all.length, untyped: 0 };
     for (const o of all) {
-      if (!o.type) counts.untyped += 1;
+      if (!o.type || !valid.has(o.type)) counts.untyped += 1;
       else counts[o.type] = (counts[o.type] || 0) + 1;
     }
     return counts;

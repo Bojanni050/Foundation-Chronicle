@@ -79,7 +79,7 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
       <div className="mb-5 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Select
-            value={type || "untyped"}
+            value={allTypes.some((t) => t.key === type) ? type : "untyped"}
             onValueChange={(v) => change("type", v === "untyped" ? null : v, setType)}
           >
             <SelectTrigger className="h-8 w-auto gap-1.5 border-border bg-transparent text-xs" data-testid="type-select">
