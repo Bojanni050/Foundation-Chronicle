@@ -49,7 +49,7 @@ export class IndexedDBObjectRepository extends ObjectRepository {
     const obj = {
       id: data.id || uid(),
       type: validateType(data.type),
-      title: data.title || "Untitled",
+      title: data.title != null ? data.title : "",
       content: data.content || "",
       tags: Array.isArray(data.tags) ? data.tags : [],
       source: data.source || "manual",

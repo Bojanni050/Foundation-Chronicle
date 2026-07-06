@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@/App.css";
 import { Toaster, toast } from "sonner";
+import { PanelRightOpen } from "lucide-react";
 import { objectRepository } from "@/repositories";
 import { getSettings } from "@/lib/settings";
 import { pollInbox } from "@/services/inboxSync";
+import { findRelatedLocal } from "@/services/weave";
 import { Sidebar } from "@/components/Sidebar";
 import { ObjectList } from "@/components/ObjectList";
 import { ObjectDetail } from "@/components/ObjectDetail";
@@ -23,6 +25,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [workspaceName, setWorkspaceName] = useState(getSettings().workspaceName);
   const [syncing, setSyncing] = useState(false);
+  const [weaveOpen, setWeaveOpen] = useState(false);
 
   const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, addType: false });
   const viewRef = useRef(view);
@@ -84,6 +87,22 @@ export default function App() {
   }, [sync]);
 
   const selectedObject = allObjects.find((o) => o.id === selectedId) || null;
+
+  // The AI weave panel is hidden by default and opens automatically only when
+  // the open entry actually has related entries to show. Manual toggle always
+  // wins until the selection (or its related set) changes.
+  const related = useMemo(
+    () => (selectedObject ? findRelatedLocal(selectedObject, allObjects) : []),
+    [selectedObject, allObjects]
+  );
+  const autoKey = `${selectedId || ""}:${related.length}`;
+  const lastAutoKey = useRef(null);
+  useEffect(() => {
+    if (autoKey !== lastAutoKey.current) {
+      lastAutoKey.current = autoKey;
+      setWeaveOpen(related.length > 0);
+    }
+  }, [autoKey, related.length]);
 
   const createNew = useCallback(async (type) => {
     const obj = await objectRepository.create({ type: type || null, title: "", content: "" });
@@ -174,13 +193,32 @@ export default function App() {
         )}
       </main>
 
-      <AIWeave
-        selectedObject={selectedObject}
-        allObjects={allObjects}
-        onOpen={openObject}
-        onRefreshInbox={() => sync(true)}
-        syncing={syncing}
-      />
+      {weaveOpen ? (
+        <AIWeave
+          selectedObject={selectedObject}
+          allObjects={allObjects}
+          onOpen={openObject}
+          onRefreshInbox={() => sync(true)}
+          syncing={syncing}
+          onCollapse={() => setWeaveOpen(false)}
+        />
+      ) : (
+        <button
+          data-testid="weave-open-rail"
+          onClick={() => setWeaveOpen(true)}
+          title="Show AI weave"
+          className="group flex h-full w-11 shrink-0 flex-col items-center gap-3 border-l border-border bg-background/40 pt-5 text-muted-foreground hover:text-primary transition-colors"
+        >
+          <PanelRightOpen className="w-4 h-4" strokeWidth={1.75} />
+          {related.length > 0 && (
+            <span
+              data-testid="weave-hint-dot"
+              className="h-1.5 w-1.5 rounded-full bg-primary"
+              title={`${related.length} related`}
+            />
+          )}
+        </button>
+      )}
 
       <SearchDialog
         open={dlg.search}

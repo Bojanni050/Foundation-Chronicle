@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
-import { Waypoints, Sparkles, Loader2, RefreshCw } from "lucide-react";
+import { Waypoints, Sparkles, Loader2, RefreshCw, PanelRightClose } from "lucide-react";
 import { findRelatedLocal } from "@/services/weave";
 import { AIService } from "@/services/AIService";
 import { typeMeta } from "@/lib/objectTypes";
+import { displayTitle } from "@/lib/format";
 
-export function AIWeave({ selectedObject, allObjects, onOpen, onRefreshInbox, syncing }) {
+export function AIWeave({ selectedObject, allObjects, onOpen, onRefreshInbox, syncing, onCollapse }) {
   const [aiIds, setAiIds] = useState(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -45,27 +46,37 @@ export function AIWeave({ selectedObject, allObjects, onOpen, onRefreshInbox, sy
           <Sparkles className="w-4 h-4 text-primary" strokeWidth={2} />
           <h2 className="font-serif text-lg text-ink">AI weave</h2>
         </div>
-        <button
-          onClick={onRefreshInbox}
-          data-testid="inbox-refresh-btn"
-          title="Pull queued items from extension"
-          className="text-muted-foreground hover:text-primary transition-colors"
-        >
-          <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={onRefreshInbox}
+            data-testid="inbox-refresh-btn"
+            title="Pull queued items from extension"
+            className="text-muted-foreground hover:text-primary transition-colors"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
+          </button>
+          <button
+            onClick={onCollapse}
+            data-testid="weave-collapse-btn"
+            title="Hide AI weave"
+            className="text-muted-foreground hover:text-ink transition-colors"
+          >
+            <PanelRightClose className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-1.5 px-5 pb-3">
         <Waypoints className="w-3.5 h-3.5 text-muted-foreground" />
         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-          Related objects
+          Related entries
         </p>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-4 no-scrollbar">
         {!selectedObject ? (
           <p className="px-1 text-sm text-muted-foreground" data-testid="weave-empty">
-            Open an object to see what it connects to.
+            Open an entry to see what it connects to.
           </p>
         ) : related.length === 0 ? (
           <p className="px-1 text-sm text-muted-foreground" data-testid="weave-none">
@@ -85,7 +96,7 @@ export function AIWeave({ selectedObject, allObjects, onOpen, onRefreshInbox, sy
                 >
                   <div className="flex items-center gap-2">
                     <Icon className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary/80" strokeWidth={1.75} />
-                    <span className="truncate text-sm text-ink">{r.object.title || "Untitled"}</span>
+                    <span className="truncate text-sm text-ink">{displayTitle(r.object)}</span>
                   </div>
                   <p className="mt-0.5 pl-5.5 text-[11px] text-primary/70">{r.reason}</p>
                 </button>

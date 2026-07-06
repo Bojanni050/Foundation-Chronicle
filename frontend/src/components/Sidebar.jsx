@@ -68,55 +68,65 @@ export function Sidebar({
 
       {/* actions */}
       <div className="px-3 space-y-0.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              data-testid="new-object-btn"
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-ink hover:bg-accent/60 transition-colors"
-            >
-              <Plus className="w-[18px] h-[18px] text-primary" strokeWidth={2} />
-              <span className="flex-1 text-left">New</span>
-              <kbd className="text-[11px] text-muted-foreground/60">⌘N</kbd>
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
-            <DropdownMenuItem data-testid="new-menu-untyped" onClick={() => onNew(null)}>
-              <CircleDashed className="w-4 h-4 mr-2 text-muted-foreground" strokeWidth={1.75} />
-              New Untyped
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {OBJECT_TYPES.filter((t) => t.key !== "chat").map((t) => (
-              <DropdownMenuItem
-                key={t.key}
-                data-testid={`new-menu-${t.key}`}
-                onClick={() => onNew(t.key)}
+        <div className="flex items-center gap-1">
+          <button
+            data-testid="new-entry-btn"
+            onClick={() => onNew(null)}
+            className="flex flex-1 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-ink hover:bg-accent/60 transition-colors"
+          >
+            <Plus className="w-[18px] h-[18px] text-primary" strokeWidth={2} />
+            <span className="flex-1 text-left">New</span>
+            <kbd className="text-[11px] text-muted-foreground/60">⌘N</kbd>
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                data-testid="new-menu-btn"
+                aria-label="More new options"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/60 hover:text-ink transition-colors"
               >
-                <t.icon className="w-4 h-4 mr-2 text-muted-foreground" strokeWidth={1.75} />
-                New {t.singular}
+                <ChevronDown className="w-4 h-4" strokeWidth={2} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem data-testid="new-menu-untyped" onClick={() => onNew(null)}>
+                <CircleDashed className="w-4 h-4 mr-2 text-muted-foreground" strokeWidth={1.75} />
+                Quick note
               </DropdownMenuItem>
-            ))}
-            {customTypes.length > 0 && <DropdownMenuSeparator />}
-            {customTypes.map((t) => (
-              <DropdownMenuItem
-                key={t.key}
-                data-testid={`new-menu-${t.key}`}
-                onClick={() => onNew(t.key)}
-              >
-                <t.icon className="w-4 h-4 mr-2 text-primary/80" strokeWidth={1.75} />
-                New {t.singular}
+              <DropdownMenuSeparator />
+              {OBJECT_TYPES.filter((t) => t.key !== "chat").map((t) => (
+                <DropdownMenuItem
+                  key={t.key}
+                  data-testid={`new-menu-${t.key}`}
+                  onClick={() => onNew(t.key)}
+                >
+                  <t.icon className="w-4 h-4 mr-2 text-muted-foreground" strokeWidth={1.75} />
+                  New {t.singular}
+                </DropdownMenuItem>
+              ))}
+              {customTypes.length > 0 && <DropdownMenuSeparator />}
+              {customTypes.map((t) => (
+                <DropdownMenuItem
+                  key={t.key}
+                  data-testid={`new-menu-${t.key}`}
+                  onClick={() => onNew(t.key)}
+                >
+                  <t.icon className="w-4 h-4 mr-2 text-primary/80" strokeWidth={1.75} />
+                  New {t.singular}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem data-testid="new-menu-add-type" onClick={onAddType}>
+                <Plus className="w-4 h-4 mr-2 text-primary" strokeWidth={1.75} />
+                Add type…
               </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem data-testid="new-menu-add-type" onClick={onAddType}>
-              <Plus className="w-4 h-4 mr-2 text-primary" strokeWidth={1.75} />
-              Add type…
-            </DropdownMenuItem>
-            <DropdownMenuItem data-testid="new-menu-import" onClick={onImport}>
-              <Upload className="w-4 h-4 mr-2 text-primary" strokeWidth={1.75} />
-              Import chat…
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <DropdownMenuItem data-testid="new-menu-import" onClick={onImport}>
+                <Upload className="w-4 h-4 mr-2 text-primary" strokeWidth={1.75} />
+                Import chat…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
 
         <button
           data-testid="sidebar-search-btn"
