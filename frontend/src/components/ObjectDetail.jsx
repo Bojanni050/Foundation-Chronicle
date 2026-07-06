@@ -77,14 +77,17 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
       <div className="mb-5 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Select
-            value={type}
-            onValueChange={(v) => change("type", v, setType)}
+            value={type || "untyped"}
+            onValueChange={(v) => change("type", v === "untyped" ? null : v, setType)}
           >
             <SelectTrigger className="h-8 w-auto gap-1.5 border-border bg-transparent text-xs" data-testid="type-select">
               <meta.icon className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="untyped" data-testid="type-option-untyped">
+                Untyped
+              </SelectItem>
               {OBJECT_TYPES.map((t) => (
                 <SelectItem key={t.key} value={t.key} data-testid={`type-option-${t.key}`}>
                   {t.singular}

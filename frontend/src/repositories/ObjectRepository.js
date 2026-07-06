@@ -17,6 +17,20 @@ function fuzzyMatch(query, text) {
   return qi === query.length;
 }
 
+// Valid object types. Type is OPTIONAL: an item may be saved without a type
+// (stored as null). But IF a type is provided, it must be one of these.
+export const VALID_TYPES = new Set([
+  "note", "person", "task", "idea", "book", "project", "meeting", "dailyLog", "chat",
+]);
+
+function validateType(type) {
+  if (type === undefined || type === null || type === "") return null;
+  if (!VALID_TYPES.has(type)) {
+    throw new Error(`Invalid object type: "${type}"`);
+  }
+  return type;
+}
+
 /**
  * Abstract repository contract. Any backend (IndexedDB now, a local
  * PostgreSQL-backed API later) must implement these methods with the same
@@ -37,7 +51,7 @@ export class IndexedDBObjectRepository extends ObjectRepository {
     const now = new Date().toISOString();
     const obj = {
       id: data.id || uid(),
-      type: data.type || "note",
+      type: validateType(data.type),
       title: data.title || "Untitled",
       content: data.content || "",
       tags: Array.isArray(data.tags) ? data.tags : [],
@@ -62,7 +76,11 @@ export class IndexedDBObjectRepository extends ObjectRepository {
     const db = await getDB();
     let all = await db.getAll(OBJECT_STORE);
     if (filter.type && filter.type !== "all") {
-      all = all.filter((o) => o.type === filter.type);
+      if (filter.type === "untyped") {
+        all = all.filter((o) => !o.type);
+      } else {
+        all = all.filter((o) => o.type === filter.type);
+      }
     }
     all.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
     return all;
@@ -72,9 +90,11 @@ export class IndexedDBObjectRepository extends ObjectRepository {
     const db = await getDB();
     const existing = await db.get(OBJECT_STORE, id);
     if (!existing) return null;
+    const cleanPatch = { ...patch };
+    if ("type" in cleanPatch) cleanPatch.type = validateType(cleanPatch.type);
     const updated = {
       ...existing,
-      ...patch,
+      ...cleanPatch,
       id,
       createdAt: existing.createdAt,
       updatedAt: new Date().toISOString(),
@@ -117,8 +137,11 @@ export class IndexedDBObjectRepository extends ObjectRepository {
 
   async counts() {
     const all = await this.list();
-    const counts = { all: all.length };
-    for (const o of all) counts[o.type] = (counts[o.type] || 0) + 1;
+    const counts = { all: all.length, untyped: 0 };
+    for (const o of all) {
+      if (!o.type) counts.untyped += 1;
+      else counts[o.type] = (counts[o.type] || 0) + 1;
+    }
     return counts;
   }
 }

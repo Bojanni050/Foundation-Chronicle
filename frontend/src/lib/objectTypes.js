@@ -8,6 +8,7 @@ import {
   Calendar,
   Sun,
   MessageSquare,
+  CircleDashed,
 } from "lucide-react";
 
 export const OBJECT_TYPES = [
@@ -22,6 +23,9 @@ export const OBJECT_TYPES = [
   { key: "chat", label: "Chats", singular: "Chat", icon: MessageSquare },
 ];
 
+// Represents an item with no chosen type (type === null)
+export const UNTYPED = { key: null, label: "Untyped", singular: "Untyped", icon: CircleDashed };
+
 export function typeMeta(key) {
-  return OBJECT_TYPES.find((t) => t.key === key) || OBJECT_TYPES[0];
+  return OBJECT_TYPES.find((t) => t.key === key) || UNTYPED;
 }

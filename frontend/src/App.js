@@ -85,17 +85,21 @@ export default function App() {
   const selectedObject = allObjects.find((o) => o.id === selectedId) || null;
 
   const createNew = useCallback(async (type) => {
-    const obj = await objectRepository.create({ type, title: "", content: "" });
+    const obj = await objectRepository.create({ type: type || null, title: "", content: "" });
     await refresh();
     setSelectedId(obj.id);
   }, [refresh]);
 
-  const listNew = () => createNew(view === "all" ? "note" : view);
+  // 'all' and 'untyped' views create an untyped item — type is an optional
+  // classification you can add later, never required at creation.
+  const listNew = () =>
+    createNew(view === "all" || view === "untyped" ? null : view);
 
   const onSaved = useCallback((updated) => {
     setObjects((prev) => {
       const has = prev.some((o) => o.id === updated.id);
-      const inView = viewRef.current === "all" || updated.type === viewRef.current;
+      const v = viewRef.current;
+      const inView = v === "all" || updated.type === v || (v === "untyped" && !updated.type);
       let next = prev.map((o) => (o.id === updated.id ? updated : o));
       if (!has && inView) next = [updated, ...prev];
       if (has && !inView) next = prev.filter((o) => o.id !== updated.id);
@@ -126,7 +130,7 @@ export default function App() {
         setDlg((d) => ({ ...d, search: true }));
       } else if (mod && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        createNew("note");
+        createNew(null);
       }
     };
     window.addEventListener("keydown", onKey);

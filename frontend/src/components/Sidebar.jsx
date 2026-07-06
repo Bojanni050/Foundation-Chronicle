@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Upload,
   Sparkles,
+  CircleDashed,
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
 import {
@@ -131,6 +132,14 @@ export function Sidebar({
             testId={`nav-${t.key}`}
           />
         ))}
+        <NavRow
+          icon={CircleDashed}
+          label="Untyped"
+          count={counts.untyped || 0}
+          active={view === "untyped"}
+          onClick={() => onSelectView("untyped")}
+          testId="nav-untyped"
+        />
       </nav>
 
       {/* footer */}
