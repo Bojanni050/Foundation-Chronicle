@@ -49,21 +49,36 @@ export default function App() {
   }, []);
 
   // inbox polling from local extension pipeline
+  const failCount = useRef(0);
   const sync = useCallback(async (manual) => {
     if (manual) setSyncing(true);
     const n = await pollInbox();
     if (manual) setSyncing(false);
     if (n > 0) {
+      failCount.current = 0;
       await refresh();
       toast.success(`${n} chat${n === 1 ? "" : "s"} pulled from extension`);
-    } else if (manual) {
-      toast("Inbox empty — start the local server & extension to queue chats.");
+    } else if (n === 0) {
+      failCount.current = 0;
+      if (manual) toast("Inbox empty — start the local server & extension to queue chats.");
+    } else {
+      failCount.current += 1;
+      if (manual) toast("Local server not reachable — run `npm run server` on your machine.");
     }
+    return n;
   }, [refresh]);
 
   useEffect(() => {
+    let id;
     sync(false);
-    const id = setInterval(() => sync(false), 5000);
+    id = setInterval(async () => {
+      // stop auto-polling after repeated failures (local server absent, e.g. hosted preview)
+      if (failCount.current >= 3) {
+        clearInterval(id);
+        return;
+      }
+      await sync(false);
+    }, 5000);
     return () => clearInterval(id);
   }, [sync]);
 

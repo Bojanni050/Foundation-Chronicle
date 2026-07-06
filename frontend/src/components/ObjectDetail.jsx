@@ -24,10 +24,12 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
   const [aiNote, setAiNote] = useState("");
   const timer = useRef(null);
   const idRef = useRef(object.id);
+  const pending = useRef({});
 
   // reseed when a different object opens
   useEffect(() => {
     idRef.current = object.id;
+    pending.current = {};
     setTitle(object.title);
     setContent(object.content);
     setTags(object.tags || []);
@@ -36,10 +38,12 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
     setAiNote("");
   }, [object.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const persist = useCallback((patch) => {
+  const persist = useCallback(() => {
     setSaveState("saving");
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
+      const patch = pending.current;
+      pending.current = {};
       const updated = await objectRepository.update(idRef.current, patch);
       setSaveState("saved");
       if (updated) onSaved(updated);
@@ -48,7 +52,8 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
 
   const change = (field, value, setter) => {
     setter(value);
-    persist({ title, content, tags, type, [field]: value });
+    pending.current = { ...pending.current, [field]: value };
+    persist();
   };
 
   const suggest = async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Search } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { objectRepository } from "@/repositories";
 import { typeMeta } from "@/lib/objectTypes";
 import { relTime } from "@/lib/format";
@@ -24,6 +24,8 @@ export function SearchDialog({ open, onOpenChange, onOpenObject }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl gap-0 overflow-hidden p-0" data-testid="search-dialog">
+        <DialogTitle className="sr-only">Search</DialogTitle>
+        <DialogDescription className="sr-only">Search your objects by title, content, or tags</DialogDescription>
         <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">
           <Search className="w-4 h-4 text-muted-foreground" />
           <input

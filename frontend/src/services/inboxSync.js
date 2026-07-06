@@ -8,10 +8,10 @@ import { objectRepository } from "@/repositories";
  */
 export async function pollInbox() {
   const { apiUrl } = getSettings();
-  if (!apiUrl) return 0;
+  if (!apiUrl) return -1;
   try {
     const res = await fetch(`${apiUrl}/api/inbox`, { method: "GET" });
-    if (!res.ok) return 0;
+    if (!res.ok) return -1;
     const items = await res.json();
     if (!Array.isArray(items) || items.length === 0) return 0;
     for (const it of items) {
@@ -28,6 +28,6 @@ export async function pollInbox() {
     await fetch(`${apiUrl}/api/inbox`, { method: "DELETE" });
     return items.length;
   } catch {
-    return 0;
+    return -1; // local server unreachable (expected in hosted preview)
   }
 }
