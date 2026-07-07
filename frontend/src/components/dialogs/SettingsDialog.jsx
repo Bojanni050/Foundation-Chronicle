@@ -4,6 +4,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { getSettings, saveSettings, AI_FUNCTIONS } from "@/lib/settings";
 import { AIService } from "@/services/AIService";
 import { fetchOpenRouterModels, getCachedOpenRouterModels, formatPrice } from "@/services/openrouterModels";
+import { toast } from "sonner";
+import { objectRepository } from "@/repositories";
+import { getDB, OBJECT_STORE } from "@/lib/db";
 
 function Field({ label, children, hint }) {
   return (
@@ -27,6 +30,80 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [modelsError, setModelsError] = useState("");
   const [embeddingModel, setEmbeddingModelState] = useState(null); // { model, options } | null
   const [embeddingBusy, setEmbeddingBusy] = useState(false);
+  const [seedBusy, setSeedBusy] = useState(false);
+
+  const handleSeed = async () => {
+    setSeedBusy(true);
+    try {
+      // 1. Seed PostgreSQL server-side traits
+      const res = await fetch(`${s.apiUrl}/api/settings/seed`, { method: "POST" });
+      if (!res.ok) throw new Error("Server seed failed");
+      
+      // 2. Clear & Seed IndexedDB objects
+      const idb = await getDB();
+      await idb.clear(OBJECT_STORE);
+
+      const demoObjects = [
+        {
+          id: "obj_demo_1",
+          type: "note",
+          title: "React & Node Setup",
+          content: "Decided to build our new company project with React and Node.js. Node is so easy for local web servers, and the package ecosystem is unmatched.",
+          tags: ["development", "node", "javascript"],
+          occurredAt: "2026-01-10T12:00:00Z",
+          temporalText: "in January 2026"
+        },
+        {
+          id: "obj_demo_2",
+          type: "note",
+          title: "Discovering Go",
+          content: "I've started exploring Go. The compiled binaries, clean static typing, and built-in concurrency features (channels/goroutines) are extremely clean compared to JS. I want to build backends in Go.",
+          tags: ["development", "go", "learning"],
+          occurredAt: "2026-02-15T12:00:00Z",
+          temporalText: "in mid-February 2026"
+        },
+        {
+          id: "obj_demo_3",
+          type: "note",
+          title: "Chronicle Backend Rewrite",
+          content: "Migrated all local backend services to Go. Moving away from Node.js entirely for production servers. It's so much faster, uses 10% of the RAM, and single binaries are a joy to run.",
+          tags: ["development", "go", "migration"],
+          occurredAt: "2026-03-10T12:00:00Z",
+          temporalText: "in March 2026"
+        },
+        {
+          id: "obj_demo_4",
+          type: "note",
+          title: "Local-First Architecture Research",
+          content: "Reading Capacities and ink-and-switch articles. Local-first apps are the future. Data ownership, instant offline load times, and vector search on localhost is a superpower.",
+          tags: ["philosophy", "local-first", "design"],
+          occurredAt: "2026-03-15T12:00:00Z",
+          temporalText: "in mid-March 2026"
+        },
+        {
+          id: "obj_demo_5",
+          type: "chat",
+          title: "AI Chat about Go performance",
+          content: "H: Why rewrite in Go?\n\nA: Go compiled binaries are smaller, start faster, and use less memory than Node.js.",
+          tags: ["go", "performance"],
+          occurredAt: "2026-04-01T12:00:00Z",
+          temporalText: "in early April 2026",
+          sourceProvider: "claude"
+        }
+      ];
+
+      for (const obj of demoObjects) {
+        await objectRepository.create(obj);
+      }
+
+      toast.success("Seeded database with rich developer demo timeline!");
+      onOpenChange(false);
+      window.location.reload();
+    } catch (err) {
+      toast.error(`Seeding failed: ${err.message}`);
+    }
+    setSeedBusy(false);
+  };
 
   useEffect(() => {
     if (open) {
@@ -300,6 +377,24 @@ export function SettingsDialog({ open, onOpenChange }) {
                 className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
               />
             </Field>
+          </section>
+
+          <div className="border-t border-border" />
+
+          <section className="space-y-4">
+            <h3 className="font-serif text-base text-ink">Demo data</h3>
+            <p className="text-xs text-muted-foreground">
+              Seed the workspace and PostgreSQL database with a pre-made timeline of developer notes and memory traits. This will reset your current objects.
+            </p>
+            <button
+              onClick={handleSeed}
+              disabled={seedBusy}
+              data-testid="seed-demo-btn"
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/95 disabled:opacity-40 transition-colors"
+            >
+              {seedBusy && <Loader2 className="w-4 h-4 animate-spin" />}
+              Seed Developer Timeline
+            </button>
           </section>
         </div>
       </DialogContent>
