@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Loader2, Check, X, Copy, Eye, EyeOff } from "lucide-react";
+import { Loader2, Check, X, Copy, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { getSettings, saveSettings, MODEL_SUGGESTIONS } from "@/lib/settings";
+import { getSettings, saveSettings, AI_FUNCTIONS } from "@/lib/settings";
 import { AIService } from "@/services/AIService";
+import { fetchOpenRouterModels, getCachedOpenRouterModels, formatPrice } from "@/services/openrouterModels";
 
 function Field({ label, children, hint }) {
   return (
@@ -20,14 +21,34 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [testState, setTestState] = useState(null); // null | testing | ok | fail
   const [testMsg, setTestMsg] = useState("");
   const [copied, setCopied] = useState(false);
+  const [models, setModels] = useState([]);
+  const [modelsFetchedAt, setModelsFetchedAt] = useState(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState("");
+  const [embeddingModel, setEmbeddingModelState] = useState(null); // { model, options } | null
+  const [embeddingBusy, setEmbeddingBusy] = useState(false);
 
   useEffect(() => {
     if (open) {
       setS(getSettings());
       setTestState(null);
       setTestMsg("");
+      const cached = getCachedOpenRouterModels();
+      setModels(cached.models);
+      setModelsFetchedAt(cached.fetchedAt);
+      loadEmbeddingModel();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const loadEmbeddingModel = async () => {
+    try {
+      const res = await fetch(`${getSettings().apiUrl}/api/settings/embedding-model`);
+      setEmbeddingModelState(res.ok ? await res.json() : null);
+    } catch {
+      setEmbeddingModelState(null);
+    }
+  };
 
   const update = (patch) => {
     const next = { ...s, ...patch };
@@ -35,11 +56,28 @@ export function SettingsDialog({ open, onOpenChange }) {
     saveSettings(patch);
   };
 
+  const updateFunctionModel = (fnKey, modelId) => {
+    update({ models: { ...s.models, [fnKey]: modelId } });
+  };
+
+  const refreshModels = async () => {
+    setModelsLoading(true);
+    setModelsError("");
+    try {
+      const list = await fetchOpenRouterModels();
+      setModels(list);
+      setModelsFetchedAt(Date.now());
+    } catch {
+      setModelsError("Couldn't reach OpenRouter's model catalog.");
+    }
+    setModelsLoading(false);
+  };
+
   const test = async () => {
     setTestState("testing");
     setTestMsg("");
     try {
-      const r = await AIService.test();
+      const r = await AIService.test(s.models.tagging);
       setTestState("ok");
       setTestMsg(`Connected · replied "${r.sample}"`);
     } catch (e) {
@@ -58,6 +96,21 @@ export function SettingsDialog({ open, onOpenChange }) {
     } catch {
       /* server not running */
     }
+  };
+
+  const setEmbedding = async (modelKey) => {
+    setEmbeddingBusy(true);
+    try {
+      const res = await fetch(`${s.apiUrl}/api/settings/embedding-model`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: modelKey }),
+      });
+      if (res.ok) setEmbeddingModelState(await res.json());
+    } catch {
+      /* server not running */
+    }
+    setEmbeddingBusy(false);
   };
 
   return (
@@ -87,26 +140,27 @@ export function SettingsDialog({ open, onOpenChange }) {
               </div>
             </Field>
 
-            <Field label="Model" hint="Free text — OpenRouter's catalog changes often.">
-              <input
-                data-testid="settings-model"
-                value={s.model}
-                onChange={(e) => update({ model: e.target.value })}
-                className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
-              />
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {MODEL_SUGGESTIONS.map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => update({ model: m })}
-                    data-testid={`model-suggestion-${m}`}
-                    className="rounded-full bg-accent px-2.5 py-1 text-[11px] text-accent-foreground hover:bg-primary/20 transition-colors"
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </Field>
+            <div className="flex items-center justify-between gap-3">
+              <button
+                onClick={refreshModels}
+                disabled={modelsLoading}
+                data-testid="fetch-models-btn"
+                className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-accent-foreground hover:bg-primary/20 disabled:opacity-40 transition-colors"
+              >
+                {modelsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                Fetch models from OpenRouter
+              </button>
+              {modelsFetchedAt && !modelsLoading && (
+                <span className="text-[11px] text-muted-foreground/70" data-testid="models-fetched-info">
+                  {models.length} models · {new Date(modelsFetchedAt).toLocaleTimeString()}
+                </span>
+              )}
+            </div>
+            {modelsError && (
+              <p className="text-xs text-destructive" data-testid="models-error">
+                {modelsError}
+              </p>
+            )}
 
             <div className="flex items-center gap-3">
               <button
@@ -126,6 +180,72 @@ export function SettingsDialog({ open, onOpenChange }) {
                 </span>
               )}
             </div>
+          </section>
+
+          <div className="border-t border-border" />
+
+          {/* Per-function models */}
+          <section className="space-y-4">
+            <h3 className="font-serif text-base text-ink">Models per function</h3>
+            <p className="text-xs text-muted-foreground">
+              Each AI feature can use its own model. Fetch OpenRouter's catalog above to see live pricing and capabilities here.
+            </p>
+            {AI_FUNCTIONS.map((fn) => {
+              const current = s.models[fn.key];
+              const inList = models.some((m) => m.id === current);
+              return (
+                <Field key={fn.key} label={fn.label} hint={fn.hint}>
+                  <select
+                    data-testid={`model-select-${fn.key}`}
+                    value={current}
+                    onChange={(e) => updateFunctionModel(fn.key, e.target.value)}
+                    className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  >
+                    {!inList && <option value={current}>{current} (not in fetched list)</option>}
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} — {formatPrice(m.promptPer1M)} / {formatPrice(m.completionPer1M)} ·{" "}
+                        {Math.round(m.contextLength / 1000)}k ctx
+                        {m.capabilities.length ? ` · ${m.capabilities.join(", ")}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              );
+            })}
+          </section>
+
+          <div className="border-t border-border" />
+
+          {/* Local embeddings */}
+          <section className="space-y-4">
+            <h3 className="font-serif text-base text-ink">Embeddings (local)</h3>
+            <p className="text-xs text-muted-foreground">
+              Runs on the local server, not OpenRouter — no key, no cost, no network dependency.
+            </p>
+            {embeddingModel ? (
+              <Field label="Model">
+                <select
+                  data-testid="embedding-model-select"
+                  value={embeddingModel.model}
+                  disabled={embeddingBusy}
+                  onChange={(e) => setEmbedding(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-40"
+                >
+                  {embeddingModel.options.map((key) => (
+                    <option key={key} value={key}>
+                      {key === "qwen3-embedding-0.6b"
+                        ? "Qwen3-Embedding-0.6B (recommended — calibrated short-phrase behavior)"
+                        : key === "bge-m3"
+                          ? "BGE-M3 (better for long documents, not short kenmerken)"
+                          : key}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ) : (
+              <p className="text-sm text-muted-foreground">Can't reach the local server — run `npm run server`.</p>
+            )}
           </section>
 
           <div className="border-t border-border" />

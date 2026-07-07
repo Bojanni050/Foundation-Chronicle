@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { objectRepository } from "@/repositories";
 import { AIService } from "@/services/AIService";
 import { rulePulse } from "@/services/pulse";
+import { gebruikKenmerk, getAssumptionsUsed } from "@/services/personaSync";
 
 export function PulseDialog({ open, onOpenChange }) {
   const [items, setItems] = useState(null);
@@ -16,11 +17,16 @@ export function PulseDialog({ open, onOpenChange }) {
     setNote("");
     const objects = await objectRepository.list();
     if (AIService.isConfigured()) {
+      const assumptions = await getAssumptionsUsed();
       try {
-        const out = await AIService.generatePulse(objects);
+        const out = await AIService.generatePulse(objects, assumptions.map((k) => k.kenmerk));
         setItems(out);
         setAiUsed(true);
         setBusy(false);
+        const pulseId = `pulse_${Date.now()}`;
+        for (const k of assumptions) {
+          gebruikKenmerk(k.id, pulseId, "ai_pulse").catch(() => {});
+        }
         return;
       } catch {
         setNote("AI Pulse unavailable — showing a rule-based digest instead.");

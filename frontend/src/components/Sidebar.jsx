@@ -8,6 +8,8 @@ import {
   Upload,
   Sparkles,
   CircleDashed,
+  Fingerprint,
+  Waypoints,
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
 import { useTypes } from "@/hooks/useTypes";
@@ -51,6 +53,8 @@ export function Sidebar({
   onAddType,
   onSearch,
   onPulse,
+  onPersona,
+  onGraph,
   onSettings,
   workspaceName,
 }) {
@@ -190,6 +194,8 @@ export function Sidebar({
       {/* footer */}
       <div className="mt-auto border-t border-border px-3 py-2">
         <NavRow icon={Activity} label="AI Pulse" active={false} onClick={onPulse} testId="nav-pulse" />
+        <NavRow icon={Fingerprint} label="Persona" active={false} onClick={onPersona} testId="nav-persona" />
+        <NavRow icon={Waypoints} label="Knowledge graph" active={false} onClick={onGraph} testId="nav-graph" />
         <button
           onClick={onSettings}
           data-testid="workspace-footer"

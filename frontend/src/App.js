@@ -15,6 +15,8 @@ import { SearchDialog } from "@/components/dialogs/SearchDialog";
 import { ImportChatDialog } from "@/components/dialogs/ImportChatDialog";
 import { SettingsDialog } from "@/components/dialogs/SettingsDialog";
 import { PulseDialog } from "@/components/dialogs/PulseDialog";
+import { PersonaDialog } from "@/components/dialogs/PersonaDialog";
+import { GraphDialog } from "@/components/dialogs/GraphDialog";
 import { AddTypeDialog } from "@/components/dialogs/AddTypeDialog";
 
 export default function App() {
@@ -27,7 +29,7 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [weaveOpen, setWeaveOpen] = useState(false);
 
-  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, addType: false });
+  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, persona: false, graph: false, addType: false });
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -168,6 +170,8 @@ export default function App() {
         onAddType={() => setDlg((d) => ({ ...d, addType: true }))}
         onSearch={() => setDlg((d) => ({ ...d, search: true }))}
         onPulse={() => setDlg((d) => ({ ...d, pulse: true }))}
+        onPersona={() => setDlg((d) => ({ ...d, persona: true }))}
+        onGraph={() => setDlg((d) => ({ ...d, graph: true }))}
         onSettings={() => setDlg((d) => ({ ...d, settings: true }))}
         workspaceName={workspaceName}
       />
@@ -232,6 +236,12 @@ export default function App() {
       />
       <SettingsDialog open={dlg.settings} onOpenChange={(v) => setDlg((d) => ({ ...d, settings: v }))} />
       <PulseDialog open={dlg.pulse} onOpenChange={(v) => setDlg((d) => ({ ...d, pulse: v }))} />
+      <PersonaDialog open={dlg.persona} onOpenChange={(v) => setDlg((d) => ({ ...d, persona: v }))} />
+      <GraphDialog
+        open={dlg.graph}
+        onOpenChange={(v) => setDlg((d) => ({ ...d, graph: v }))}
+        onOpenObject={openObject}
+      />
       <AddTypeDialog
         open={dlg.addType}
         onOpenChange={(v) => setDlg((d) => ({ ...d, addType: v }))}

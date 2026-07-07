@@ -56,6 +56,11 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       sourceProvider: data.sourceProvider || null,
       sourceUrl: data.sourceUrl || null,
       links: Array.isArray(data.links) ? data.links : [],
+      occurredAt: data.occurredAt || null,
+      validFrom: data.validFrom || null,
+      validTo: data.validTo || null,
+      temporalText: data.temporalText || null,
+      lastProcessedForPersonaAt: data.lastProcessedForPersonaAt || null,
       createdAt: data.createdAt || now,
       updatedAt: now,
     };
@@ -95,7 +100,7 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       ...cleanPatch,
       id,
       createdAt: existing.createdAt,
-      updatedAt: new Date().toISOString(),
+      updatedAt: patch.updatedAt !== undefined ? patch.updatedAt : new Date().toISOString(),
     };
     await db.put(OBJECT_STORE, updated);
     return updated;
@@ -120,10 +125,12 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       .map((o) => {
         const title = (o.title || "").toLowerCase();
         const tags = (o.tags || []).join(" ").toLowerCase();
-        const hay = [title, (o.content || "").toLowerCase(), tags, (o.sourceProvider || "").toLowerCase()].join(" ");
+        const temporal = (o.temporalText || "").toLowerCase();
+        const hay = [title, (o.content || "").toLowerCase(), tags, (o.sourceProvider || "").toLowerCase(), temporal].join(" ");
         let score = 0;
         if (title.includes(q)) score += 5;
         if (tags.includes(q)) score += 3;
+        if (temporal.includes(q)) score += 2;
         if (hay.includes(q)) score += 1;
         if (score === 0 && fuzzyMatch(q, hay)) score += 0.5;
         return { o, score };

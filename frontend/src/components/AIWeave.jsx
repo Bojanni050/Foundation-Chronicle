@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Waypoints, Sparkles, Loader2, RefreshCw, PanelRightClose } from "lucide-react";
 import { findRelatedLocal } from "@/services/weave";
 import { AIService } from "@/services/AIService";
+import { getAssumptionsUsed } from "@/services/personaSync";
 import { typeMeta } from "@/lib/objectTypes";
 import { displayTitle } from "@/lib/format";
 
@@ -30,7 +31,10 @@ export function AIWeave({ selectedObject, allObjects, onOpen, onRefreshInbox, sy
     setNote("");
     setBusy(true);
     try {
-      const ids = await AIService.findRelated(selectedObject, allObjects);
+      const assumptions = await getAssumptionsUsed().catch(() => []);
+      const traits = assumptions.map((a) => a.kenmerk);
+      const candidates = allObjects.filter((o) => o.id !== selectedObject.id);
+      const ids = await AIService.findRelated(selectedObject, candidates, traits);
       setAiIds(ids);
     } catch {
       setNote("AI weave unavailable — showing tag & text matches.");
