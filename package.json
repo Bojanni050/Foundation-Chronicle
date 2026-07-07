@@ -6,6 +6,13 @@
   "scripts": {
     "dev": "cd frontend && yarn start",
     "server": "cd server && node index.js",
-    "install:all": "cd frontend && yarn install && cd ../server && npm install"
+    "build": "cd frontend && yarn build",
+    "install:all": "cd frontend && yarn install && cd ../server && npm install",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
   }
 }
