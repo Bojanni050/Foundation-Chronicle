@@ -33,8 +33,31 @@ function writeInbox(arr) {
   fs.writeFileSync(INBOX_FILE, JSON.stringify(arr, null, 2));
 }
 
+const allowedOriginsPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$|^chrome-extension:\/\//;
+
 const app = express();
-app.use(cors()); // safe: server only listens on 127.0.0.1
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOriginsPattern.test(origin)) {
+        return callback(null, true);
+      } else {
+        return callback(new Error("Not allowed by CORS"));
+      }
+    },
+  })
+);
+
+// Enforce safe origins at routing level to block CSRF and unauthorized cross-origin requests
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && !allowedOriginsPattern.test(origin)) {
+    return res.status(403).json({ error: "Forbidden origin" });
+  }
+  next();
+});
+
 app.use(express.json({ limit: "10mb" }));
 
 // Mount Sub-routers

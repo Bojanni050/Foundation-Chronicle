@@ -69,7 +69,24 @@ export const personaInstelling = pgTable("persona_instelling", {
   id: uuid("id").primaryKey().defaultRandom(),
   confidenceThreshold: integer("confidence_threshold").notNull().default(90),
   promotieMinBronnen: integer("promotie_min_bronnen").notNull().default(2),
+  // Disposition traits (1-5, default 3 = neutral) — same three-trait concept
+  // Hindsight's Reflect uses to shape how a bank interprets information,
+  // rebuilt here rather than depending on their service. Feed into detection
+  // and Pulse prompts, not into the promotion math itself.
+  skepticism: integer("skepticism").notNull().default(3),
+  literalism: integer("literalism").notNull().default(3),
+  empathy: integer("empathy").notNull().default(3),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// "Mental model" cache (Hindsight-inspired, rebuilt locally): the last AI
+// Pulse result, shown instantly on open instead of regenerating every time.
+// Singleton — Pulse has exactly one current digest, not a history.
+export const personaPulseCache = pgTable("persona_pulse_cache", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  items: text("items").array().notNull(),
+  aiUsed: boolean("ai_used").notNull().default(false),
+  generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // assumption_used log: every time an above-threshold kenmerk actually influences

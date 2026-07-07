@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Check, Fingerprint, Loader2, X, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Fingerprint, Loader2, X, Sparkles } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { getSettings } from "@/lib/settings";
 import { AIService } from "@/services/AIService";
 import {
   bevestigKenmerk,
@@ -9,8 +10,27 @@ import {
   magGebruiktWorden,
   verwerpKenmerk,
   fetchAlleKenmerken,
-  reflectHindsight,
+  reflecteerOverTijd,
 } from "@/services/personaSync";
+
+function InstellingField({ label, hint, value, onChange, min, max }) {
+  return (
+    <label className="flex items-center justify-between gap-3 text-xs">
+      <span className="text-muted-foreground" title={hint}>
+        {label}
+      </span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        data-testid={`instelling-${label.toLowerCase().replace(/\s+/g, "-")}`}
+        className="w-16 rounded border border-border bg-card/50 px-2 py-1 text-right text-xs text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
+      />
+    </label>
+  );
+}
 
 export function PersonaDialog({ open, onOpenChange }) {
   const [state, setState] = useState(null); // { instelling, kenmerken } | null
@@ -18,6 +38,7 @@ export function PersonaDialog({ open, onOpenChange }) {
   const [tab, setTab] = useState("current"); // current | history
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
+  const [instellingenOpen, setInstellingenOpen] = useState(false);
 
   const load = async () => {
     const [stateData, allData] = await Promise.all([
@@ -47,24 +68,37 @@ export function PersonaDialog({ open, onOpenChange }) {
     await load();
   };
 
-  const runHindsight = async () => {
+  const runReflectie = async () => {
     setNote("");
     if (!AIService.isConfigured()) {
       setNote("Add an OpenRouter key in Settings first.");
       return;
     }
     setBusy(true);
-    const res = await reflectHindsight();
+    const res = await reflecteerOverTijd();
     setBusy(false);
     if (!res.success) {
       if (res.reason === "NO_TEMPORAL_DATA") {
         setNote("No notes have temporal details (occurredAt, temporalText) to reflect on.");
       } else {
-        setNote(`Hindsight reflection failed: ${res.reason}`);
+        setNote(`Temporal reflection failed: ${res.reason}`);
       }
     } else {
       setNote(`Reflected temporal evolution! Applied ${res.reflectionsCount} changes.`);
       await load();
+    }
+  };
+
+  const updateInstelling = async (patch) => {
+    const { apiUrl } = getSettings();
+    const res = await fetch(`${apiUrl}/api/persona/instelling`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) {
+      const instelling = await res.json();
+      setState((s) => ({ ...s, instelling }));
     }
   };
 
@@ -120,7 +154,7 @@ export function PersonaDialog({ open, onOpenChange }) {
                   : "border-transparent text-muted-foreground hover:text-ink"
               }`}
             >
-              Hindsight History
+              History
             </button>
           </div>
         )}
@@ -240,6 +274,66 @@ export function PersonaDialog({ open, onOpenChange }) {
             )
           )}
 
+          {state?.instelling && (
+            <div className="rounded-lg border border-border/60">
+              <button
+                onClick={() => setInstellingenOpen((v) => !v)}
+                data-testid="persona-instellingen-toggle"
+                className="flex w-full items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground hover:text-ink"
+              >
+                Instellingen
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${instellingenOpen ? "rotate-180" : ""}`} />
+              </button>
+              {instellingenOpen && (
+                <div className="space-y-2 border-t border-border/60 px-3 py-2.5">
+                  <InstellingField
+                    label="Confidence threshold"
+                    hint="Zekerheid vanaf waar een kenmerk automatisch bruikbaar is"
+                    min={0}
+                    max={100}
+                    value={state.instelling.confidence_threshold}
+                    onChange={(v) => updateInstelling({ confidenceThreshold: v })}
+                  />
+                  <InstellingField
+                    label="Promotie min. bronnen"
+                    hint="Aantal onafhankelijke bronnen nodig voor promotie"
+                    min={1}
+                    max={10}
+                    value={state.instelling.promotie_min_bronnen}
+                    onChange={(v) => updateInstelling({ promotieMinBronnen: v })}
+                  />
+                  <div className="mt-1 border-t border-border/40 pt-2 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                    Disposition (1-5)
+                  </div>
+                  <InstellingField
+                    label="Skepticism"
+                    hint="Laag = vertrouwvol, hoog = kritisch/twijfelend"
+                    min={1}
+                    max={5}
+                    value={state.instelling.skepticism}
+                    onChange={(v) => updateInstelling({ skepticism: v })}
+                  />
+                  <InstellingField
+                    label="Literalism"
+                    hint="Laag = leest tussen de regels, hoog = neemt letterlijk"
+                    min={1}
+                    max={5}
+                    value={state.instelling.literalism}
+                    onChange={(v) => updateInstelling({ literalism: v })}
+                  />
+                  <InstellingField
+                    label="Empathy"
+                    hint="Laag = feiten-gericht, hoog = houdt rekening met context"
+                    min={1}
+                    max={5}
+                    value={state.instelling.empathy}
+                    onChange={(v) => updateInstelling({ empathy: v })}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {note && (
             <p className="text-[11px] text-primary/80" data-testid="persona-note">
               {note}
@@ -257,13 +351,13 @@ export function PersonaDialog({ open, onOpenChange }) {
               Detect patterns
             </button>
             <button
-              onClick={runHindsight}
+              onClick={runReflectie}
               disabled={busy}
-              data-testid="reflect-hindsight-btn"
+              data-testid="temporal-reflection-btn"
               className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-border py-2.5 text-sm font-medium text-ink hover:bg-accent/40 disabled:opacity-40 transition-colors"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              Reflect Hindsight
+              Temporal reflection
             </button>
           </div>
         </div>

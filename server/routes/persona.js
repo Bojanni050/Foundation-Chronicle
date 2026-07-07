@@ -16,12 +16,34 @@ router.patch("/instelling", async (req, res) => {
   const current = await getOrCreateInstelling();
   const confidenceThreshold = req.body?.confidenceThreshold ?? current.confidence_threshold;
   const promotieMinBronnen = req.body?.promotieMinBronnen ?? current.promotie_min_bronnen;
+  const skepticism = req.body?.skepticism ?? current.skepticism;
+  const literalism = req.body?.literalism ?? current.literalism;
+  const empathy = req.body?.empathy ?? current.empathy;
   const { rows } = await pool.query(
-    `UPDATE persona_instelling SET confidence_threshold = $1, promotie_min_bronnen = $2, updated_at = now()
-     WHERE id = $3 RETURNING *`,
-    [confidenceThreshold, promotieMinBronnen, current.id]
+    `UPDATE persona_instelling
+     SET confidence_threshold = $1, promotie_min_bronnen = $2, skepticism = $3, literalism = $4, empathy = $5, updated_at = now()
+     WHERE id = $6 RETURNING *`,
+    [confidenceThreshold, promotieMinBronnen, skepticism, literalism, empathy, current.id]
   );
   res.json(rows[0]);
+});
+
+// GET /api/persona/pulse — cached "mental model" of the last generated digest
+router.get("/pulse", async (_req, res) => {
+  const { rows } = await pool.query("SELECT * FROM persona_pulse_cache ORDER BY generated_at DESC LIMIT 1");
+  res.json(rows[0] || null);
+});
+
+// POST /api/persona/pulse — overwrite the cache with a freshly generated digest
+router.post("/pulse", async (req, res) => {
+  const { items, aiUsed } = req.body || {};
+  if (!Array.isArray(items)) return res.status(400).json({ error: "items array required" });
+  await pool.query("DELETE FROM persona_pulse_cache");
+  const { rows } = await pool.query(
+    "INSERT INTO persona_pulse_cache (items, ai_used) VALUES ($1, $2) RETURNING *",
+    [items, !!aiUsed]
+  );
+  res.status(201).json(rows[0]);
 });
 
 // GET /api/persona/kenmerken
@@ -234,8 +256,9 @@ router.post("/kenmerken/:id/gebruik", async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
-// POST /api/persona/hindsight/reflect
-router.post("/hindsight/reflect", async (req, res) => {
+// POST /api/persona/reflectie — temporal reflection: reasons over how kenmerken
+// evolved over time (validFrom/validTo/temporalText, supersession via vervangenDoor).
+router.post("/reflectie", async (req, res) => {
   const { creations = [], updates = [] } = req.body || {};
   const client = await pool.connect();
   try {
@@ -334,7 +357,7 @@ router.post("/hindsight/reflect", async (req, res) => {
     res.json({ success: true, created: createdRows });
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("Hindsight transaction failed:", err.message);
+    console.error("Temporal reflection transaction failed:", err.message);
     res.status(500).json({ error: err.message });
   } finally {
     client.release();

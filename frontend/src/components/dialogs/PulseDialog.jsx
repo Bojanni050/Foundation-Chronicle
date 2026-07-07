@@ -1,28 +1,55 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Activity, Loader2, Sparkles } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { objectRepository } from "@/repositories";
 import { AIService } from "@/services/AIService";
 import { rulePulse } from "@/services/pulse";
-import { gebruikKenmerk, getAssumptionsUsed } from "@/services/personaSync";
+import {
+  cachePulse,
+  gebruikKenmerk,
+  getAssumptionsUsed,
+  getCachedPulse,
+  getPersonaState,
+} from "@/services/personaSync";
 
 export function PulseDialog({ open, onOpenChange }) {
   const [items, setItems] = useState(null);
   const [busy, setBusy] = useState(false);
   const [aiUsed, setAiUsed] = useState(false);
   const [note, setNote] = useState("");
+  const [cachedAt, setCachedAt] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    getCachedPulse().then((cached) => {
+      if (cached) {
+        setItems(cached.items);
+        setAiUsed(cached.ai_used);
+        setCachedAt(cached.generated_at);
+      }
+    });
+  }, [open]);
 
   const generate = async () => {
     setBusy(true);
     setNote("");
+    setCachedAt(null);
     const objects = await objectRepository.list();
     if (AIService.isConfigured()) {
-      const assumptions = await getAssumptionsUsed();
+      const [assumptions, state] = await Promise.all([getAssumptionsUsed(), getPersonaState()]);
+      const disposition = state?.instelling
+        ? {
+            skepticism: state.instelling.skepticism,
+            literalism: state.instelling.literalism,
+            empathy: state.instelling.empathy,
+          }
+        : {};
       try {
-        const out = await AIService.generatePulse(objects, assumptions.map((k) => k.kenmerk));
+        const out = await AIService.generatePulse(objects, assumptions.map((k) => k.kenmerk), disposition);
         setItems(out);
         setAiUsed(true);
         setBusy(false);
+        cachePulse(out, true).catch(() => {});
         const pulseId = `pulse_${Date.now()}`;
         for (const k of assumptions) {
           gebruikKenmerk(k.id, pulseId, "ai_pulse").catch(() => {});
@@ -32,9 +59,11 @@ export function PulseDialog({ open, onOpenChange }) {
         setNote("AI Pulse unavailable — showing a rule-based digest instead.");
       }
     }
-    setItems(rulePulse(objects));
+    const ruleItems = rulePulse(objects);
+    setItems(ruleItems);
     setAiUsed(false);
     setBusy(false);
+    cachePulse(ruleItems, false).catch(() => {});
   };
 
   return (
@@ -68,8 +97,12 @@ export function PulseDialog({ open, onOpenChange }) {
           )}
           {note && <p className="text-[11px] text-primary/80" data-testid="pulse-note">{note}</p>}
           {items !== null && (
-            <p className="text-[11px] text-muted-foreground/70">
-              {aiUsed ? "Generated with OpenRouter." : "Rule-based digest (no AI key set)."}
+            <p className="text-[11px] text-muted-foreground/70" data-testid="pulse-source-note">
+              {cachedAt
+                ? `Cached · generated ${new Date(cachedAt).toLocaleString()}`
+                : aiUsed
+                  ? "Generated with OpenRouter."
+                  : "Rule-based digest (no AI key set)."}
             </p>
           )}
 

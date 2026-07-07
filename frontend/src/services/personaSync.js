@@ -80,6 +80,30 @@ export async function verwerpKenmerk(id) {
   return res.json();
 }
 
+/** Cached "mental model" of the last Pulse digest — null if never generated. */
+export async function getCachedPulse() {
+  const { apiUrl } = getSettings();
+  if (!apiUrl) return null;
+  try {
+    const res = await fetch(`${apiUrl}/api/persona/pulse`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function cachePulse(items, aiUsed) {
+  const { apiUrl } = getSettings();
+  const res = await fetch(`${apiUrl}/api/persona/pulse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items, aiUsed }),
+  });
+  if (!res.ok) throw new Error("PERSONA_API_ERROR");
+  return res.json();
+}
+
 /** assumption_used log — call after a kenmerk actually shaped an AI suggestion. */
 export async function gebruikKenmerk(id, objectId, context) {
   const { apiUrl } = getSettings();
@@ -171,8 +195,8 @@ export async function detectPersonaKenmerken(limit = 30) {
   }
 }
 
-/** Runs the Hindsight temporal reflection process */
-export async function reflectHindsight() {
+/** Runs the temporal reflection process — how kenmerken evolved over time. */
+export async function reflecteerOverTijd() {
   const { apiUrl } = getSettings();
   if (!apiUrl || !AIService.isConfigured()) return { success: false, reason: "NOT_CONFIGURED" };
   try {
@@ -204,7 +228,7 @@ export async function reflectHindsight() {
     }
 
     // 4. Send modifications to the server
-    const res = await fetch(`${apiUrl}/api/persona/hindsight/reflect`, {
+    const res = await fetch(`${apiUrl}/api/persona/reflectie`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -215,13 +239,13 @@ export async function reflectHindsight() {
 
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || "Hindsight transaction failed");
+      throw new Error(errBody.error || "Temporal reflection transaction failed");
     }
 
     const data = await res.json();
     return { success: true, reflectionsCount: reflections.length, created: data.created };
   } catch (err) {
-    console.error("reflectHindsight error:", err);
+    console.error("reflecteerOverTijd error:", err);
     return { success: false, reason: err.message || "ERROR" };
   }
 }
