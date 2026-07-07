@@ -20,6 +20,7 @@ async function autoTags(text) {
 export function ImportChatDialog({ open, onOpenChange, onImported }) {
   const [paste, setPaste] = useState("");
   const [busy, setBusy] = useState(false);
+  const [statusText, setStatusText] = useState("");
   const [msg, setMsg] = useState("");
   const fileRef = useRef(null);
 
@@ -27,10 +28,21 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
     setBusy(true);
     setMsg("");
     let created = 0;
-    for (const { text, provider } of entries) {
+    const total = entries.length;
+
+    for (let i = 0; i < total; i++) {
+      const { text, filename, provider } = entries[i];
       if (!text.trim()) continue;
+
+      const fileLabel = filename ? `"${filename}"` : `chat ${i + 1}`;
+
+      setStatusText(`[${i + 1}/${total}] Parsing structure of ${fileLabel}...`);
       const parsed = parseChat(text);
+
+      setStatusText(`[${i + 1}/${total}] Analyzing content and generating tags for ${fileLabel}...`);
       const tags = await autoTags(parsed.content);
+
+      setStatusText(`[${i + 1}/${total}] Saving ${fileLabel} to your database...`);
       await objectRepository.create({
         type: "chat",
         title: parsed.title,
@@ -41,6 +53,8 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
       });
       created++;
     }
+
+    setStatusText("");
     setBusy(false);
     if (created > 0) {
       onImported(created);
@@ -54,12 +68,14 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
   const handleFiles = async (fileList) => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
+    setBusy(true);
+    setStatusText("Reading uploaded files...");
     const entries = await Promise.all(
       files.map(
         (f) =>
           new Promise((resolve) => {
             const reader = new FileReader();
-            reader.onload = () => resolve({ text: String(reader.result || ""), provider: null });
+            reader.onload = () => resolve({ text: String(reader.result || ""), filename: f.name, provider: null });
             reader.readAsText(f);
           })
       )
@@ -69,7 +85,18 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg" data-testid="import-dialog">
+      <DialogContent className="max-w-lg relative overflow-hidden" data-testid="import-dialog">
+        {busy && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background/95 backdrop-blur-sm p-6">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <div className="text-center space-y-2 max-w-[80%]">
+              <p className="text-sm font-semibold text-ink">Importing your chats</p>
+              <p className="text-xs text-muted-foreground/80 animate-pulse font-sans leading-relaxed">
+                {statusText || "Starting import..."}
+              </p>
+            </div>
+          </div>
+        )}
         <DialogHeader>
           <DialogTitle className="font-serif text-xl">Import chat</DialogTitle>
         </DialogHeader>

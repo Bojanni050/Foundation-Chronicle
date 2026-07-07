@@ -68,6 +68,62 @@ function tryChatGPT(data) {
   };
 }
 
+// Markdown conversation parser: supports headings, bold indicators, blockquotes
+function tryMarkdown(text) {
+  const lines = (text || "").split(/\r?\n/);
+  const turns = [];
+  let current = null;
+  
+  // Matches:
+  // - > **User**: Hello
+  // - ### User
+  // - **User**: Hello
+  const roleRe = /^\s*(?:>\s*)?(?:###?\s+)?\*\*(you|human|user|me|h|q|prompt|client|guest)\*\*[:\s-]*|^\s*(?:>\s*)?###?\s+(you|human|user|me|h|q|prompt|client|guest)[:\s-]*/i;
+  const asstRe = /^\s*(?:>\s*)?(?:###?\s+)?\*\*(assistant|ai|chatgpt|claude|gemini|gpt|a|answer|bot)\*\*[:\s-]*|^\s*(?:>\s*)?###?\s+(assistant|ai|chatgpt|claude|gemini|gpt|a|answer|bot)[:\s-]*/i;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (current) current.text += "\n";
+      continue;
+    }
+    
+    if (asstRe.test(line)) {
+      if (current) {
+        current.text = current.text.trim();
+        turns.push(current);
+      }
+      current = { role: "assistant", text: line.replace(asstRe, "") };
+    } else if (roleRe.test(line)) {
+      if (current) {
+        current.text = current.text.trim();
+        turns.push(current);
+      }
+      current = { role: "user", text: line.replace(roleRe, "") };
+    } else if (current) {
+      current.text += "\n" + line;
+    }
+  }
+  
+  if (current) {
+    current.text = current.text.trim();
+    turns.push(current);
+  }
+  
+  const validTurns = turns
+    .map(t => ({ role: t.role, text: t.text.trim() }))
+    .filter(t => t.text.length > 0);
+    
+  if (validTurns.length >= 2) {
+    return {
+      title: titleFromTurns(validTurns),
+      content: formatTurns(validTurns),
+      sourceProvider: null,
+    };
+  }
+  return null;
+}
+
 // Plain pasted conversation: detect "H:/A:", "Human:/Assistant:", "You:/ChatGPT:" etc
 function parsePlain(text) {
   const lines = (text || "").split(/\r?\n/);
@@ -107,7 +163,7 @@ function parsePlain(text) {
 
 /**
  * Parse a chat file/paste into { title, content, sourceProvider }.
- * Tries Claude JSON, then ChatGPT JSON, then plain-text conversation.
+ * Tries Claude JSON, then ChatGPT JSON, then Markdown, then plain-text conversation.
  */
 export function parseChat(text) {
   let data = null;
@@ -117,9 +173,10 @@ export function parseChat(text) {
     /* not JSON */
   }
   if (data) {
-    return tryClaude(data) || tryChatGPT(data) || parsePlain(text);
+    const jsonParsed = tryClaude(data) || tryChatGPT(data);
+    if (jsonParsed) return jsonParsed;
   }
-  return parsePlain(text);
+  return tryMarkdown(text) || parsePlain(text);
 }
 
 export function keywordTags(text, n = 4) {
