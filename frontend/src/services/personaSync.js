@@ -170,3 +170,58 @@ export async function detectPersonaKenmerken(limit = 30) {
     return -1; // local server or AI unreachable
   }
 }
+
+/** Runs the Hindsight temporal reflection process */
+export async function reflectHindsight() {
+  const { apiUrl } = getSettings();
+  if (!apiUrl || !AIService.isConfigured()) return { success: false, reason: "NOT_CONFIGURED" };
+  try {
+    const [allTraits, allObjects] = await Promise.all([
+      fetchAlleKenmerken(),
+      objectRepository.list()
+    ]);
+
+    // 1. Filter objects that have temporal metadata
+    const temporalObjects = allObjects.filter(
+      (o) => o.occurredAt || o.validFrom || o.validTo || o.temporalText
+    );
+
+    if (temporalObjects.length === 0) {
+      return { success: false, reason: "NO_TEMPORAL_DATA" };
+    }
+
+    // 2. Sort chronologically
+    temporalObjects.sort((a, b) => {
+      const dateA = a.occurredAt || a.createdAt || "";
+      const dateB = b.occurredAt || b.createdAt || "";
+      return dateA.localeCompare(dateB);
+    });
+
+    // 3. Call LLM to reflect on timeline and identify changes
+    const reflections = await AIService.reflectTemporalBeliefs(allTraits, temporalObjects);
+    if (!reflections || reflections.length === 0) {
+      return { success: true, reflectionsCount: 0 };
+    }
+
+    // 4. Send modifications to the server
+    const res = await fetch(`${apiUrl}/api/persona/hindsight/reflect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        creations: reflections.filter((r) => r.action === "create"),
+        updates: reflections.filter((r) => r.action === "update"),
+      }),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || "Hindsight transaction failed");
+    }
+
+    const data = await res.json();
+    return { success: true, reflectionsCount: reflections.length, created: data.created };
+  } catch (err) {
+    console.error("reflectHindsight error:", err);
+    return { success: false, reason: err.message || "ERROR" };
+  }
+}

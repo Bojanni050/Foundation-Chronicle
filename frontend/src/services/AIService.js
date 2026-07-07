@@ -169,6 +169,47 @@ export const AIService = {
     if (!arr || !arr.length) throw new Error("BAD_RESPONSE");
     return arr.map((s) => String(s));
   },
+
+  // Analyzes temporal evolution of the user's persona over a timeline of events.
+  async reflectTemporalBeliefs(existingKenmerken, temporalObjects) {
+    const { models } = getSettings();
+    
+    const existingList = existingKenmerken
+      .map((k) => `${k.id} :: "${k.kenmerk}" (status: ${k.status}, active since: ${k.validFrom || k.createdAt})`)
+      .join("\n") || "(none yet)";
+      
+    const eventsList = temporalObjects
+      .map((o) => {
+        const time = o.occurredAt 
+          ? new Date(o.occurredAt).toLocaleDateString() 
+          : (o.temporalText || new Date(o.createdAt).toLocaleDateString());
+        return `[${time}] [${o.type}] ${o.title}\n${(o.content || "").slice(0, 400)}`;
+      })
+      .join("\n\n");
+
+    const out = await chat(
+      [
+        {
+          role: "system",
+          content:
+            "You are Hindsight, a reflective layer that studies the history of a user's knowledge archive (their 'persona') to track how their habits, preferences, and beliefs have evolved over time.\n\n" +
+            "You are given a list of KNOWN TRAITS (active or rejected) and a chronological list of TEMPORAL EVENTS.\n\n" +
+            "Analyze the timeline of events. For each trait in the KNOWN TRAITS, determine if it has changed, been replaced, or was only valid during a specific timeframe. Also identify if new habits/beliefs have emerged.\n\n" +
+            "You can output two types of actions:\n" +
+            "1. 'update': Update an existing trait because it was only valid in the past, has been replaced, or has a specific duration. Set validTo (ISO string) and temporalText (e.g. 'Winter 2025'). If it has been replaced, set status to 'rejected', provide a verwerpReden explaining the replacement, and set vervangenByTemporaryId to point to the temporaryId of the new replacing trait.\n" +
+            "2. 'create': Create a new trait representing the new evolved habit/belief. Set validFrom (ISO string), temporalText (e.g. 'since June'), and specify a temporaryId (e.g. 'temp_1') if this trait is a replacement for an old one.\n\n" +
+            "Return ONLY a JSON array of reflection action objects. Do not wrap in a parent object, return the array directly. Example: [{\"action\": \"create\", ...}, ...]. Return an empty array [] if there is no temporal evolution or change. No prose.",
+        },
+        { role: "user", content: `KNOWN TRAITS:\n${existingList}\n\nTEMPORAL EVENTS:\n${eventsList}` },
+      ],
+      { max_tokens: 800, temperature: 0.2 },
+      models.persona
+    );
+
+    const arr = firstJsonArray(out);
+    if (!arr) return [];
+    return arr;
+  },
 };
 
 export { keywordTags };

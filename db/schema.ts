@@ -54,6 +54,9 @@ export const personaKenmerk = pgTable("persona_kenmerk", {
   // the "why" of a consolidation stays inspectable instead of silent.
   vervangenDoor: uuid("vervangen_door"),
   verwerpReden: text("verwerp_reden"),
+  validFrom: timestamp("valid_from", { withTimezone: true }),
+  validTo: timestamp("valid_to", { withTimezone: true }),
+  temporalText: text("temporal_text"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   laatstVersterktOp: timestamp("laatst_versterkt_op", { withTimezone: true })
     .notNull()
