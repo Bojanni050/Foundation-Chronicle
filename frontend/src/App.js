@@ -18,6 +18,7 @@ import { PulseDialog } from "@/components/dialogs/PulseDialog";
 import { PersonaDialog } from "@/components/dialogs/PersonaDialog";
 import { GraphDialog } from "@/components/dialogs/GraphDialog";
 import { AddTypeDialog } from "@/components/dialogs/AddTypeDialog";
+import { EngineDialog } from "@/components/dialogs/EngineDialog";
 
 export default function App() {
   const [view, setView] = useState("all");
@@ -29,7 +30,7 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [weaveOpen, setWeaveOpen] = useState(false);
 
-  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, persona: false, graph: false, addType: false });
+  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false });
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -172,6 +173,7 @@ export default function App() {
         onPulse={() => setDlg((d) => ({ ...d, pulse: true }))}
         onPersona={() => setDlg((d) => ({ ...d, persona: true }))}
         onGraph={() => setDlg((d) => ({ ...d, graph: true }))}
+        onEngine={() => setDlg((d) => ({ ...d, engine: true }))}
         onSettings={() => setDlg((d) => ({ ...d, settings: true }))}
         workspaceName={workspaceName}
       />
@@ -246,6 +248,10 @@ export default function App() {
         open={dlg.addType}
         onOpenChange={(v) => setDlg((d) => ({ ...d, addType: v }))}
         onCreated={(type) => { setView(type.key); createNew(type.key); }}
+      />
+      <EngineDialog
+        open={dlg.engine}
+        onOpenChange={(v) => setDlg((d) => ({ ...d, engine: v }))}
       />
 
       <Toaster position="bottom-center" theme="light" toastOptions={{ style: { background: "hsl(30 12% 22%)", color: "hsl(36 33% 97%)", border: "none" } }} />

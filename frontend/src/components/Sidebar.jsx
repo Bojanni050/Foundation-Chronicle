@@ -10,6 +10,7 @@ import {
   CircleDashed,
   Fingerprint,
   Waypoints,
+  Cpu,
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
 import { useTypes } from "@/hooks/useTypes";
@@ -55,6 +56,7 @@ export function Sidebar({
   onPulse,
   onPersona,
   onGraph,
+  onEngine,
   onSettings,
   workspaceName,
 }) {
@@ -196,6 +198,7 @@ export function Sidebar({
         <NavRow icon={Activity} label="AI Pulse" active={false} onClick={onPulse} testId="nav-pulse" />
         <NavRow icon={Fingerprint} label="Persona" active={false} onClick={onPersona} testId="nav-persona" />
         <NavRow icon={Waypoints} label="Knowledge graph" active={false} onClick={onGraph} testId="nav-graph" />
+        <NavRow icon={Cpu} label="Chronicle Engine" active={false} onClick={onEngine} testId="nav-engine" />
         <button
           onClick={onSettings}
           data-testid="workspace-footer"
