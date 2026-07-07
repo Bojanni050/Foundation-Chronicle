@@ -3,9 +3,10 @@ import { keywordTags } from "@/services/chatParser";
 
 const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 
-async function chat(messages, extra = {}, model) {
+async function chat(messages, extra = {}, model, context = "unknown") {
   const { openrouterKey, models } = getSettings();
   if (!openrouterKey) throw new Error("NO_KEY");
+  const activeModel = model || models.tagging;
   const res = await fetch(ENDPOINT, {
     method: "POST",
     headers: {
@@ -14,13 +15,70 @@ async function chat(messages, extra = {}, model) {
       "HTTP-Referer": window.location.origin,
       "X-Title": "Chronicle",
     },
-    body: JSON.stringify({ model: model || models.tagging, messages, ...extra }),
+    body: JSON.stringify({ model: activeModel, messages, ...extra }),
   });
   if (!res.ok) {
     const t = await res.text().catch(() => "");
     throw new Error(`AI_ERROR ${res.status} ${t.slice(0, 120)}`);
   }
   const data = await res.json();
+
+  // Track stats
+  try {
+    const usage = data.usage;
+    if (usage) {
+      const promptTokens = usage.prompt_tokens || 0;
+      const completionTokens = usage.completion_tokens || 0;
+
+      // Estimate prices based on cached list in local storage
+      let promptPrice = 0.07;
+      let completionPrice = 0.21;
+
+      const { getCachedOpenRouterModels } = await import("./openrouterModels");
+      const { models: cachedList } = getCachedOpenRouterModels();
+      const matchedModel = cachedList.find((m) => m.id === activeModel);
+      if (matchedModel) {
+        promptPrice = matchedModel.promptPer1M || 0;
+        completionPrice = matchedModel.completionPer1M || 0;
+      }
+
+      const cost = (promptTokens * promptPrice + completionTokens * completionPrice) / 1000000;
+
+      const STATS_KEY = "chronicle_token_stats";
+      let stats = {
+        totalPromptTokens: 0,
+        totalCompletionTokens: 0,
+        totalCost: 0,
+        calls: [],
+      };
+
+      const raw = localStorage.getItem(STATS_KEY);
+      if (raw) {
+        try {
+          stats = JSON.parse(raw);
+        } catch {}
+      }
+
+      stats.totalPromptTokens = (stats.totalPromptTokens || 0) + promptTokens;
+      stats.totalCompletionTokens = (stats.totalCompletionTokens || 0) + completionTokens;
+      stats.totalCost = (stats.totalCost || 0) + cost;
+
+      const callRecord = {
+        timestamp: new Date().toISOString(),
+        context,
+        model: activeModel,
+        promptTokens,
+        completionTokens,
+        cost,
+      };
+
+      stats.calls = [callRecord, ...(stats.calls || [])].slice(0, 50);
+      localStorage.setItem(STATS_KEY, JSON.stringify(stats));
+    }
+  } catch (err) {
+    console.error("Failed to track token statistics:", err.message);
+  }
+
   return data.choices?.[0]?.message?.content || "";
 }
 
@@ -43,7 +101,8 @@ export const AIService = {
     const out = await chat(
       [{ role: "user", content: "Reply with the single word: ok" }],
       { max_tokens: 5 },
-      model
+      model,
+      "test"
     );
     return { ok: true, sample: out.trim() };
   },
@@ -61,7 +120,8 @@ export const AIService = {
         { role: "user", content: (content || "").slice(0, 4000) },
       ],
       { max_tokens: 60, temperature: 0.2 },
-      models.tagging
+      models.tagging,
+      "tagging"
     );
     const arr = firstJsonArray(out);
     if (!arr || !arr.length) throw new Error("BAD_RESPONSE");
@@ -96,7 +156,8 @@ export const AIService = {
         },
       ],
       { max_tokens: 200, temperature: 0.2 },
-      models.weave
+      models.weave,
+      "weave"
     );
     return firstJsonArray(out) || [];
   },
@@ -133,7 +194,8 @@ export const AIService = {
         { role: "user", content: `DO NOT SUGGEST THESE PATTERNS (previously rejected by the user):\n${rejectedList}\n\nOBJECTS:\n${objectList}` },
       ],
       { max_tokens: 500, temperature: 0.2 },
-      models.persona
+      models.persona,
+      "persona"
     );
     const arr = firstJsonArray(out);
     if (!arr) throw new Error("BAD_RESPONSE");
@@ -172,7 +234,8 @@ export const AIService = {
         { role: "user", content: `Objects:\n${digest}${kenmerkenBlock}${dispositionBlock}` },
       ],
       { max_tokens: 300, temperature: 0.4 },
-      models.pulse
+      models.pulse,
+      "pulse"
     );
     const arr = firstJsonArray(out);
     if (!arr || !arr.length) throw new Error("BAD_RESPONSE");
@@ -212,13 +275,29 @@ export const AIService = {
         { role: "user", content: `KNOWN TRAITS:\n${existingList}\n\nTEMPORAL EVENTS:\n${eventsList}` },
       ],
       { max_tokens: 800, temperature: 0.2 },
-      models.persona
+      models.persona,
+      "reflection"
     );
 
     const arr = firstJsonArray(out);
     if (!arr) return [];
     return arr;
   },
+
+  getTokenStats() {
+    const STATS_KEY = "chronicle_token_stats";
+    try {
+      const raw = localStorage.getItem(STATS_KEY);
+      return raw ? JSON.parse(raw) : { totalPromptTokens: 0, totalCompletionTokens: 0, totalCost: 0, calls: [] };
+    } catch {
+      return { totalPromptTokens: 0, totalCompletionTokens: 0, totalCost: 0, calls: [] };
+    }
+  },
+
+  clearTokenStats() {
+    const STATS_KEY = "chronicle_token_stats";
+    localStorage.removeItem(STATS_KEY);
+  }
 };
 
 export { keywordTags };
