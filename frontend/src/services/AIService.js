@@ -283,6 +283,26 @@ export const AIService = {
     if (!arr) return [];
     return arr;
   },
+  async extractFromScreenpipe(rawText) {
+    const { models } = getSettings();
+    const out = await chat(
+      [
+        {
+          role: "system",
+          content:
+            "You study the OCR screen history and audio transcripts of a user's computer. " +
+            "Extract a list of up to 4 significant ideas, tasks, or notes that are clearly discussed, researched, or worked on by the user. " +
+            "Return ONLY a JSON array of objects containing 'type' ('note'|'task'|'idea'), 'title', 'content', and 'tags' (lowercase array). " +
+            "No prose outside the JSON.",
+        },
+        { role: "user", content: `Raw Screenpipe data:\n${rawText.slice(0, 8000)}` },
+      ],
+      { max_tokens: 500, temperature: 0.3 },
+      models.pulse,
+      "screenpipe"
+    );
+    return firstJsonArray(out) || [];
+  },
 
   getTokenStats() {
     const STATS_KEY = "chronicle_token_stats";

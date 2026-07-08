@@ -63,6 +63,7 @@ app.use(express.json({ limit: "10mb" }));
 // Mount Sub-routers
 app.use("/api/settings", settingsRouter);
 app.use("/api/persona", personaRouter);
+app.use("/api/screenpipe", require("./routes/screenpipe"));
 
 // Extension → queue a chat object
 app.post("/api/objects/import", requireAuth, (req, res) => {

@@ -12,6 +12,7 @@ import {
   Waypoints,
   Cpu,
   Lock,
+  Monitor,
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
 import { useTypes } from "@/hooks/useTypes";
@@ -52,6 +53,7 @@ export function Sidebar({
   onSelectView,
   onNew,
   onImport,
+  onScreenpipe,
   onAddType,
   onSearch,
   onPulse,
@@ -131,6 +133,10 @@ export function Sidebar({
               <DropdownMenuItem data-testid="new-menu-import" onClick={onImport}>
                 <Upload className="w-4 h-4 mr-2 text-primary" strokeWidth={1.75} />
                 Import chat…
+              </DropdownMenuItem>
+              <DropdownMenuItem data-testid="new-menu-screenpipe" onClick={onScreenpipe}>
+                <Monitor className="w-4 h-4 mr-2 text-primary" strokeWidth={1.75} />
+                Import Screenpipe…
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -14,6 +14,7 @@ import { AIWeave } from "@/components/AIWeave";
 import { WelcomeEmpty } from "@/components/EmptyState";
 import { SearchDialog } from "@/components/dialogs/SearchDialog";
 import { ImportChatDialog } from "@/components/dialogs/ImportChatDialog";
+import { ImportScreenpipeDialog } from "@/components/dialogs/ImportScreenpipeDialog";
 import { SettingsDialog } from "@/components/dialogs/SettingsDialog";
 import { PulseDialog } from "@/components/dialogs/PulseDialog";
 import { PersonaDialog } from "@/components/dialogs/PersonaDialog";
@@ -32,7 +33,7 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [weaveOpen, setWeaveOpen] = useState(false);
 
-  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false });
+  const [dlg, setDlg] = useState({ search: false, import: false, screenpipe: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false });
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -174,6 +175,7 @@ export default function App() {
         onSelectView={(v) => { setView(v); setSelectedId(null); }}
         onNew={createNew}
         onImport={() => setDlg((d) => ({ ...d, import: true }))}
+        onScreenpipe={() => setDlg((d) => ({ ...d, screenpipe: true }))}
         onAddType={() => setDlg((d) => ({ ...d, addType: true }))}
         onSearch={() => setDlg((d) => ({ ...d, search: true }))}
         onPulse={() => setDlg((d) => ({ ...d, pulse: true }))}
@@ -242,6 +244,21 @@ export default function App() {
         open={dlg.import}
         onOpenChange={(v) => setDlg((d) => ({ ...d, import: v }))}
         onImported={async (n) => { await refresh(); toast.success(`Imported ${n} chat${n === 1 ? "" : "s"}`); }}
+      />
+      <ImportScreenpipeDialog
+        open={dlg.screenpipe}
+        onOpenChange={(v) => setDlg((d) => ({ ...d, screenpipe: v }))}
+        onAddObjects={async (objectsToCreate) => {
+          for (const item of objectsToCreate) {
+            await objectRepository.create({
+              type: item.type,
+              title: item.title,
+              content: item.content,
+              tags: item.tags,
+            });
+          }
+          await refresh();
+        }}
       />
       <SettingsDialog open={dlg.settings} onOpenChange={(v) => setDlg((d) => ({ ...d, settings: v }))} />
       <PulseDialog open={dlg.pulse} onOpenChange={(v) => setDlg((d) => ({ ...d, pulse: v }))} />
