@@ -1,61 +1,79 @@
 # Chronicle
 
-A calm, minimal, **local-first** personal knowledge app inspired by Capacities.
-Single-user, private, no cloud database or auth. Everything is an *object* with a
-type — notes, people, tasks, ideas, books, projects, meetings, daily logs, chats.
+A calm, minimal, **local-first** personal knowledge app inspired by Capacities. 
+Single-user, private, offline-first. Your notes, chats, tasks, and memory reflections remain strictly on your own device.
 
-- **Frontend**: React + Tailwind CSS (in `frontend/`)
-- **Data**: IndexedDB via a swappable repository layer (`frontend/src/repositories/`)
-- **Local API server**: Node + Express, localhost-only (`server/`)
-- **Browser extension**: Manifest V3, vanilla JS (`extension/`)
-- **AI**: OpenRouter (bring your own key), with graceful non-AI fallbacks
-- No Supabase / Firebase / cloud DB / embeddings / vector search
+---
 
-## Architecture — built for a future Postgres migration
+## 🏗️ Architecture & Technology Stack
 
-All data access goes through the `ObjectRepository` contract
-(`create, getById, list, update, delete, search, counts`). The current
-implementation is `IndexedDBObjectRepository`. To migrate to a local
-PostgreSQL-backed API later, implement a new class against the same contract
-and swap the single line in `frontend/src/repositories/index.js` — **no UI code
-changes required.**
+Chronicle operates on a hybrid storage model designed for offline-first speed and local-first data ownership:
 
-## Run (development)
+- **Frontend**: React + Tailwind CSS (inside `frontend/`)
+- **Desktop Wrapper**: **Tauri v2** for a lightweight, secure local footprint.
+- **Client Storage**: **IndexedDB** handles local-first storage for user objects (notes, tasks, ideas, chats).
+- **Relational Storage & Vector Search**: **PostgreSQL (port 5434)** running **pgvector** handles persona traits, pulse caches, and metadata relations, accessed via **Drizzle ORM** (inside `server/`).
+- **Local AI Vector Embeddings**: 1024-dimensional vectors are computed directly on-device in Node.js using `@huggingface/transformers` CPU ONNX models.
+- **Local API Server**: Node.js + Express (`server/`) running concurrently with the frontend.
+- **Browser Extension**: Manifest V3 extension (`extension/`) for instant chat scraping and ingestion.
+- **Security & CSRF Protection**: Hardened CORS policies restricted to localhost/extensions and server-level HTTP Origin verification middleware to prevent Bearer token leakage.
 
-Run the web app and the local API server side by side:
+---
 
-```bash
-# 1. Web app
-cd frontend && yarn install && yarn start      # or: npm run dev  (from repo root)
+## ⚡ Getting Started (Run Development)
 
-# 2. Local API server (separate terminal)
-cd server && npm install && npm start          # or: npm run server (from repo root)
-```
+To run the application, start both the Express API backend and the React frontend. This is handled automatically in a single command using `concurrently`:
 
-The server binds to `127.0.0.1:4577` only and prints an auth **token** on first
-start (also stored in `server/data/token.txt`). Paste that token into the app's
-**Settings → Browser extension** and into the extension popup.
+### Prerequisites
+1. Ensure your local PostgreSQL instance is running with `pgvector` enabled on port `5434`.
+   ```bash
+   # Run the local database container
+   docker compose -f db/docker-compose.yml up -d
+   ```
+2. Install dependencies:
+   ```bash
+   npm run install:all
+   ```
 
-## Browser extension
+### Running the App
+- **Browser Mode**: Launches React on port `3000` and starts the Node server concurrently.
+  ```bash
+  npm run dev
+  ```
+- **Desktop Mode**: Launches the native Tauri desktop window and starts the backend concurrently.
+  ```bash
+  npm run tauri:dev
+  ```
 
-See `extension/README.md`. In short: `chrome://extensions` → enable Developer
-mode → **Load unpacked** → select the `extension/` folder → paste API URL + token.
+---
 
-## Features
+## 🌟 Advanced Features
 
-1. **Quick capture** — create notes/objects with minimal friction; freeform tags.
-2. **AI chat import** — paste text or upload `.json/.txt/.md`; detects Claude &
-   ChatGPT exports and plain conversations; bulk import supported.
-3. **Local API + extension pipeline** — the extension scrapes a chat and POSTs it
-   to the local server's inbox queue; the web app polls and imports it.
-4. **Search (⌘K)** — fuzzy search across title, content, tags, provider.
-5. **OpenRouter AI** — configurable key + model, "Test connection", graceful
-   fallback so objects always save even when AI is unavailable.
-6. **Auto-tagging** — AI-suggested tags, or keyword extraction fallback.
-7. **AI Weave** — related objects via shared tags + text similarity (AI optional).
-8. **AI Pulse** — on-demand digest (AI or rule-based).
+### 🔐 Local Username & PIN Lock Screen
+* Secure your local workspace. On first launch, set up a username and choose a 4-to-6 digit security PIN code.
+* Interactive numpad with tactile hover effects, keyboard bind entries (`0-9` and `Backspace`), shake animation error handlers, and a "Lock Workspace" action in the sidebar.
 
-## Keyboard shortcuts
+### 🔍 Chronicle Engine & Diagnostic Board
+An interactive visual diagnostic panel with four views:
+1. **System Flow**: Interactive diagram mapping the data ingestion, local ONNX embedding generation, PostgreSQL pgvector storage, and duplicate detection pipelines.
+2. **Memory Evolution**: Tracks the lifecycle of Persona traits, highlighting consolidation merging ($>0.75$ similarity) and Hindsight temporal reflection (`vervangen_door` replacing links).
+3. **Token Telemetry**: Displays total prompt tokens, total completion tokens, estimated USD api costs, and a detailed audit log of the last 50 AI pipeline completions.
+4. **Philosophy**: Outlines the core design decisions: local-first security, calm technology patterns, and prompt-bloat mitigation.
 
-- `⌘/Ctrl + N` — new note
-- `⌘/Ctrl + K` — search
+### 🖥️ Screenpipe Ambient Sync
+* Integrated CORS proxy router queries your local Screenpipe database (`localhost:3030`) for OCR screen logs and audio transcriptions.
+* AI extracts promising ideas and tasks, presenting them in an interactive checklist where you can edit titles/descriptions, switch types, and import them with one click.
+
+### 💬 Context-Aware Hermes Chat Agent
+* Dedicated AI settings allowing you to define a custom OpenAI-compatible completions endpoint (e.g. `https://hermes-agent.nousresearch.com/v1` or a local `hermes gateway` on `http://localhost:8642/v1`) and bearer keys.
+* Automatically fetches confirmed memory/persona traits from PostgreSQL and injects them dynamically into the system prompt, providing Hermes with your developer persona context during the chat.
+
+### 🛠️ Developer Timeline Demo Seeder
+* Instantly populates the app with simulated history (IndexedDB developer timelines from January to April 2026) and server-side PostgreSQL persona traits with local ONNX embeddings precalculated.
+* Activated via the "Seed Developer Timeline" button in Settings.
+
+---
+
+## ⌨️ Keyboard Shortcuts (Windows / Linux Native)
+- `Ctrl + N` — Create a new object
+- `Ctrl + K` — Open quick search dialog
