@@ -111,6 +111,18 @@ export const AIService = {
     return { ok: true, sample: out.trim() };
   },
 
+  async testHermes(endpoint, key, model) {
+    const out = await chat(
+      [{ role: "user", content: "Reply with the single word: ok" }],
+      { max_tokens: 5 },
+      model || "hermes-agent",
+      "test",
+      endpoint,
+      key
+    );
+    return { ok: true, sample: out.trim() };
+  },
+
   // Returns 2-4 tags. Throws on failure so caller can fall back to keywords.
   async suggestTags(content) {
     const { models } = getSettings();
