@@ -30,6 +30,14 @@
 }
 
 @layer base {
+    html {
+        font-size: 16px;
+    }
+    @media (min-width: 2000px) {
+        html {
+            font-size: 18px;
+        }
+    }
     * {
         @apply border-border;
     }

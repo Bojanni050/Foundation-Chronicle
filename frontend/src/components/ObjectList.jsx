@@ -28,19 +28,19 @@ function ListItem({ obj, active, onClick }) {
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className="truncate text-[15px] font-medium text-ink">{heading}</p>
+          <p className="truncate text-base font-medium text-ink">{heading}</p>
           {obj.sourceProvider && (
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${providerDot[obj.sourceProvider] || "bg-muted-foreground/40"}`} />
           )}
         </div>
         {preview && (
-          <p className="mt-1 text-[13px] leading-snug text-muted-foreground line-clamp-2">{preview}</p>
+          <p className="mt-1 text-sm leading-snug text-muted-foreground line-clamp-2">{preview}</p>
         )}
         <div className="mt-2 flex items-center gap-2">
           <Icon className="w-3 h-3 shrink-0 text-muted-foreground/60 group-hover:text-primary/70" strokeWidth={1.75} />
-          <span className="text-[11px] text-muted-foreground/70">{relTime(obj.updatedAt)}</span>
+          <span className="text-xs text-muted-foreground/70">{relTime(obj.updatedAt)}</span>
           {(obj.tags || []).slice(0, 2).map((t) => (
-            <span key={t} className="text-[11px] text-primary/70">#{t}</span>
+            <span key={t} className="text-xs text-primary/70">#{t}</span>
           ))}
         </div>
       </div>
@@ -53,7 +53,7 @@ export function ObjectList({ view, objects, selectedId, onSelect, onNew }) {
   const count = objects.length;
 
   return (
-    <div className="flex h-full w-[320px] shrink-0 flex-col border-r border-border">
+    <div className="flex h-full w-[360px] shrink-0 flex-col border-r border-border">
       <div className="flex items-start justify-between px-5 pt-5 pb-3">
         <div>
           <h1 className="font-serif text-2xl text-ink" data-testid="list-title">{title}</h1>

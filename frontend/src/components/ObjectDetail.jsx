@@ -148,7 +148,7 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
         value={content}
         onChange={(e) => change("content", e.target.value, setContent)}
         placeholder="Start writing…"
-        className="mt-4 flex-1 w-full resize-none bg-transparent text-[16px] leading-relaxed text-ink/90 placeholder:text-muted-foreground/40 focus:outline-none no-scrollbar whitespace-pre-wrap"
+        className="mt-4 flex-1 w-full resize-none bg-transparent text-base leading-relaxed text-ink/90 placeholder:text-muted-foreground/40 focus:outline-none no-scrollbar whitespace-pre-wrap"
       />
 
       {/* subtle metadata bar — everything about classifying comes AFTER writing */}
