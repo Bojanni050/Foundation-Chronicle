@@ -15,6 +15,7 @@ import { WelcomeEmpty } from "@/components/EmptyState";
 import { SearchDialog } from "@/components/dialogs/SearchDialog";
 import { ImportChatDialog } from "@/components/dialogs/ImportChatDialog";
 import { ImportScreenpipeDialog } from "@/components/dialogs/ImportScreenpipeDialog";
+import { ChatDialog } from "@/components/dialogs/ChatDialog";
 import { SettingsDialog } from "@/components/dialogs/SettingsDialog";
 import { PulseDialog } from "@/components/dialogs/PulseDialog";
 import { PersonaDialog } from "@/components/dialogs/PersonaDialog";
@@ -33,7 +34,7 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [weaveOpen, setWeaveOpen] = useState(false);
 
-  const [dlg, setDlg] = useState({ search: false, import: false, screenpipe: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false });
+  const [dlg, setDlg] = useState({ search: false, import: false, screenpipe: false, chat: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false });
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -179,6 +180,7 @@ export default function App() {
         onAddType={() => setDlg((d) => ({ ...d, addType: true }))}
         onSearch={() => setDlg((d) => ({ ...d, search: true }))}
         onPulse={() => setDlg((d) => ({ ...d, pulse: true }))}
+        onChat={() => setDlg((d) => ({ ...d, chat: true }))}
         onPersona={() => setDlg((d) => ({ ...d, persona: true }))}
         onGraph={() => setDlg((d) => ({ ...d, graph: true }))}
         onEngine={() => setDlg((d) => ({ ...d, engine: true }))}
@@ -262,6 +264,7 @@ export default function App() {
       />
       <SettingsDialog open={dlg.settings} onOpenChange={(v) => setDlg((d) => ({ ...d, settings: v }))} />
       <PulseDialog open={dlg.pulse} onOpenChange={(v) => setDlg((d) => ({ ...d, pulse: v }))} />
+      <ChatDialog open={dlg.chat} onOpenChange={(v) => setDlg((d) => ({ ...d, chat: v }))} />
       <PersonaDialog open={dlg.persona} onOpenChange={(v) => setDlg((d) => ({ ...d, persona: v }))} />
       <GraphDialog
         open={dlg.graph}

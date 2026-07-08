@@ -7,6 +7,7 @@ export const AI_FUNCTIONS = [
   { key: "weave", label: "AI Weave", hint: "Picks related objects from a candidate list — needs decent reasoning." },
   { key: "pulse", label: "AI Pulse", hint: "Writes a short digest of your stack — benefits from a more capable model." },
   { key: "persona", label: "Persona detection", hint: "Judges soort/gevoelig per kenmerk — needs careful, nuanced reasoning." },
+  { key: "chat", label: "AI Chat / Hermes", hint: "Model used for interactive conversations with the Hermes agent." },
 ];
 
 const DEFAULT_MODEL = "deepseek/deepseek-v4-flash";
@@ -18,6 +19,7 @@ const DEFAULTS = {
     weave: DEFAULT_MODEL,
     pulse: DEFAULT_MODEL,
     persona: DEFAULT_MODEL,
+    chat: "nousresearch/hermes-3-llama-3-8b",
   },
   apiUrl: "http://127.0.0.1:4577",
   apiToken: "",

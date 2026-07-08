@@ -304,6 +304,40 @@ export const AIService = {
     return firstJsonArray(out) || [];
   },
 
+  async chatWithHermes(messages) {
+    const { models, apiUrl } = getSettings();
+    let traitsText = "";
+    try {
+      if (apiUrl) {
+        const res = await fetch(`${apiUrl}/api/persona/kenmerken`);
+        if (res.ok) {
+          const traits = await res.json();
+          traitsText = traits.map(t => `- ${t.kenmerk}`).join("\n");
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch persona traits for chat prompt context:", err.message);
+    }
+
+    const systemPrompt = 
+      "You are Hermes, a helpful, context-aware AI assistant running inside Chronicle, a local-first personal knowledge app.\n" +
+      "You have access to the user's confirmed memory traits below. Use them as a background lens to understand the user's context, habits, preferences, and style, but do not restate them unless directly relevant to the conversation.\n\n" +
+      (traitsText ? `USER'S PERSONAL TRAITS:\n${traitsText}\n\n` : "") +
+      "Maintain a supportive, clear, and highly professional tone.";
+
+    const formattedMessages = [
+      { role: "system", content: systemPrompt },
+      ...messages
+    ];
+
+    return await chat(
+      formattedMessages,
+      { temperature: 0.7 },
+      models.chat,
+      "chat"
+    );
+  },
+
   getTokenStats() {
     const STATS_KEY = "chronicle_token_stats";
     try {
