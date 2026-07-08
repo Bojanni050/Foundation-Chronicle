@@ -11,6 +11,7 @@ import {
   Fingerprint,
   Waypoints,
   Cpu,
+  Lock,
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
 import { useTypes } from "@/hooks/useTypes";
@@ -57,6 +58,7 @@ export function Sidebar({
   onPersona,
   onGraph,
   onEngine,
+  onLock,
   onSettings,
   workspaceName,
 }) {
@@ -82,7 +84,7 @@ export function Sidebar({
           >
             <Plus className="w-[18px] h-[18px] text-primary" strokeWidth={2} />
             <span className="flex-1 text-left">New</span>
-            <kbd className="text-[11px] text-muted-foreground/60">⌘N</kbd>
+            <kbd className="text-[11px] text-muted-foreground/60">Ctrl+N</kbd>
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -141,7 +143,7 @@ export function Sidebar({
         >
           <Search className="w-[18px] h-[18px]" strokeWidth={1.75} />
           <span className="flex-1 text-left">Search</span>
-          <kbd className="text-[11px] text-muted-foreground/60">⌘K</kbd>
+          <kbd className="text-[11px] text-muted-foreground/60">Ctrl+K</kbd>
         </button>
       </div>
 
@@ -199,6 +201,7 @@ export function Sidebar({
         <NavRow icon={Fingerprint} label="Persona" active={false} onClick={onPersona} testId="nav-persona" />
         <NavRow icon={Waypoints} label="Knowledge graph" active={false} onClick={onGraph} testId="nav-graph" />
         <NavRow icon={Cpu} label="Chronicle Engine" active={false} onClick={onEngine} testId="nav-engine" />
+        <NavRow icon={Lock} label="Lock workspace" active={false} onClick={onLock} testId="nav-lock" />
         <button
           onClick={onSettings}
           data-testid="workspace-footer"

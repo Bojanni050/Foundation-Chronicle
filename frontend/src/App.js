@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@/App.css";
 import { Toaster, toast } from "sonner";
 import { PanelRightOpen } from "lucide-react";
+import { LoginScreen } from "@/components/LoginScreen";
 import { objectRepository } from "@/repositories";
 import { getSettings } from "@/lib/settings";
 import { pollInbox } from "@/services/inboxSync";
@@ -21,6 +22,7 @@ import { AddTypeDialog } from "@/components/dialogs/AddTypeDialog";
 import { EngineDialog } from "@/components/dialogs/EngineDialog";
 
 export default function App() {
+  const [authenticated, setAuthenticated] = useState(false);
   const [view, setView] = useState("all");
   const [objects, setObjects] = useState([]);
   const [allObjects, setAllObjects] = useState([]);
@@ -160,6 +162,10 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [createNew]);
 
+  if (!authenticated) {
+    return <LoginScreen onSuccess={() => setAuthenticated(true)} />;
+  }
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <Sidebar
@@ -174,6 +180,7 @@ export default function App() {
         onPersona={() => setDlg((d) => ({ ...d, persona: true }))}
         onGraph={() => setDlg((d) => ({ ...d, graph: true }))}
         onEngine={() => setDlg((d) => ({ ...d, engine: true }))}
+        onLock={() => setAuthenticated(false)}
         onSettings={() => setDlg((d) => ({ ...d, settings: true }))}
         workspaceName={workspaceName}
       />
