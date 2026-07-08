@@ -217,6 +217,28 @@ export function SettingsDialog({ open, onOpenChange }) {
               </div>
             </Field>
 
+            <h4 className="font-serif text-xs font-semibold uppercase tracking-wider text-muted-foreground pt-1">AI Chat · Hermes Agent</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Hermes Agent API URL" hint="OpenAI-compatible gateway endpoint for Nous Hermes Agent.">
+                <input
+                  type="text"
+                  value={s.chatEndpoint || ""}
+                  onChange={(e) => update({ chatEndpoint: e.target.value })}
+                  placeholder="https://hermes-agent.nousresearch.com/v1"
+                  className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-xs text-ink focus:outline-none"
+                />
+              </Field>
+              <Field label="Hermes Agent API Key" hint="Optional secret key. Uses OpenRouter key if left blank.">
+                <input
+                  type="password"
+                  value={s.chatKey || ""}
+                  onChange={(e) => update({ chatKey: e.target.value })}
+                  placeholder="Bearer token (optional)"
+                  className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-xs text-ink focus:outline-none"
+                />
+              </Field>
+            </div>
+
             <div className="flex items-center justify-between gap-3">
               <button
                 onClick={refreshModels}

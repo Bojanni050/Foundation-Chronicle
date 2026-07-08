@@ -3,14 +3,18 @@ import { keywordTags } from "@/services/chatParser";
 
 const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 
-async function chat(messages, extra = {}, model, context = "unknown") {
+async function chat(messages, extra = {}, model, context = "unknown", customEndpoint = null, customKey = null) {
   const { openrouterKey, models } = getSettings();
-  if (!openrouterKey) throw new Error("NO_KEY");
+  const activeKey = customKey || openrouterKey;
+  if (!activeKey) throw new Error("NO_KEY");
   const activeModel = model || models.tagging;
-  const res = await fetch(ENDPOINT, {
+  const endpoint = customEndpoint
+    ? `${customEndpoint.replace(/\/+$/, "")}/chat/completions`
+    : "https://openrouter.ai/api/v1/chat/completions";
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${openrouterKey}`,
+      Authorization: `Bearer ${activeKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": window.location.origin,
       "X-Title": "Chronicle",
@@ -305,7 +309,7 @@ export const AIService = {
   },
 
   async chatWithHermes(messages) {
-    const { models, apiUrl } = getSettings();
+    const { models, chatEndpoint, chatKey, apiUrl } = getSettings();
     let traitsText = "";
     try {
       if (apiUrl) {
@@ -334,7 +338,9 @@ export const AIService = {
       formattedMessages,
       { temperature: 0.7 },
       models.chat,
-      "chat"
+      "chat",
+      chatEndpoint,
+      chatKey
     );
   },
 

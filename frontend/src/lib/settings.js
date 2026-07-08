@@ -14,12 +14,14 @@ const DEFAULT_MODEL = "deepseek/deepseek-v4-flash";
 
 const DEFAULTS = {
   openrouterKey: "",
+  chatEndpoint: "https://hermes-agent.nousresearch.com/v1",
+  chatKey: "",
   models: {
     tagging: DEFAULT_MODEL,
     weave: DEFAULT_MODEL,
     pulse: DEFAULT_MODEL,
     persona: DEFAULT_MODEL,
-    chat: "nousresearch/hermes-3-llama-3-8b",
+    chat: "hermes-agent",
   },
   apiUrl: "http://127.0.0.1:4577",
   apiToken: "",
