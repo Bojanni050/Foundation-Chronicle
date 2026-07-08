@@ -4,7 +4,7 @@
   "private": true,
   "description": "Chronicle — a calm, local-first personal knowledge app.",
   "scripts": {
-    "dev": "cd frontend && yarn start",
+    "dev": "concurrently \"npm run server\" \"cd frontend && yarn start\"",
     "server": "cd server && node index.js",
     "build": "cd frontend && yarn build",
     "install:all": "cd frontend && yarn install && cd ../server && npm install",
@@ -13,6 +13,7 @@
     "tauri:build": "tauri build"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4"
+    "@tauri-apps/cli": "^2.11.4",
+    "concurrently": "^10.0.3"
   }
 }
