@@ -10,15 +10,14 @@ export async function chatWithHermes(messages) {
   return chatWithGaia(messages);
 }
 
-// When enabled, Gaia's own turn (not specialist calls — those stay on their
-// own configured model) routes through her self-contained Hermes backend
-// instead of OpenRouter directly. URL/key are fetched fresh from Chronicle's
-// backend every call, never cached in settings/localStorage — see the
-// comment on gaiaHermesEnabled in lib/settings.js for why. On any failure
-// this throws rather than silently falling back to direct OpenRouter, so a
-// misconfigured or stopped Hermes backend surfaces clearly instead of
-// masking itself as ordinary chat behavior.
+// When enabled, Gaia's chat turn is routed through Chronicle's own backend
+// proxy endpoint (/api/settings/gaia-hermes-chat), which then forwards the
+// request to the self-contained Hermes gateway (127.0.0.1:9120). This is
+// necessary because the browser cannot call 127.0.0.1:9120 directly — Hermes
+// issues a 403 on CORS OPTIONS preflight requests. The Chronicle backend has
+// no CORS issue and keeps the API key server-side (never in localStorage).
 async function resolveGaiaEndpoint(apiUrl) {
+  // Verify the backend actually has a valid Hermes config before we route there
   let res;
   try {
     res = await fetch(`${apiUrl}/api/settings/gaia-hermes-config`);
@@ -28,11 +27,17 @@ async function resolveGaiaEndpoint(apiUrl) {
   if (!res.ok) {
     throw new Error(`Chronicle kon Gaia's Hermes-configuratie niet ophalen (HTTP ${res.status}).`);
   }
-  const { url, key } = await res.json();
-  if (!url || !key) {
+  const { key } = await res.json();
+  if (!key) {
     throw new Error("Gaia's Hermes-backend heeft nog geen geldige API-key (nog niet opgestart?).");
   }
-  return { customEndpoint: url, customKey: key };
+  // Return Chronicle's own proxy URL stripped of the trailing /chat/completions
+  // suffix — core.js will append that itself. The sentinel key "proxy" satisfies
+  // core.js's non-empty check; the real auth is handled server-side.
+  return {
+    customEndpoint: `${apiUrl}/api/settings/gaia-hermes`,
+    customKey: "proxy",
+  };
 }
 
 export async function chatWithGaia(messages) {
