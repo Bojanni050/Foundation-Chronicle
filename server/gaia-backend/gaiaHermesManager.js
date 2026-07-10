@@ -94,10 +94,10 @@ async function startGaiaHermes() {
 
   gaiaHermesProcess = spawn(
     "hermes",
-    ["gateway", "run"],
+    ["gateway", "run", "--replace"],
     {
       env: { ...process.env, HERMES_HOME: GAIA_HERMES_HOME },
-      shell: true, // required on Windows to resolve "hermes" from PATH
+      shell: process.platform === "win32", // required on Windows to resolve "hermes" from PATH
     }
   );
 
