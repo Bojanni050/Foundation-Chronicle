@@ -19,6 +19,7 @@ const { startBackgroundJobs } = require("./jobs");
 const { readInbox, writeInbox, pushToInbox } = require("./inboxStore");
 const { startGaiaHermes, stopGaiaHermes, registerSpecialistsMcp } = require("./gaia-backend/gaiaHermesManager");
 
+const gaiaHermesRouter = require("./routes/gaiaHermes");
 const settingsRouter = require("./routes/settings");
 const personaRouter = require("./routes/persona");
 const embeddingRouter = require("./routes/embedding");
@@ -63,7 +64,9 @@ app.use("/mcp/specialists", require("./gaia-backend/specialistsMcpServer"));
 
 app.use(express.json({ limit: "10mb" }));
 
-// Mount Sub-routers
+// Mount Sub-routers. Gaia Hermes goes first so its guarded chat proxy shadows
+// the legacy proxy route in settings.js.
+app.use("/api/settings", gaiaHermesRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/persona", personaRouter);
 app.use("/api/specialist", specialistRouter);
