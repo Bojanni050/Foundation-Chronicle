@@ -45,8 +45,7 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [seedBusy, setSeedBusy] = useState(false);
   const [ggufPath, setGgufPath] = useState("");
   const [ggufSaveState, setGgufSaveState] = useState(null); // null | saving | saved
-  const [pureMemoryEnabled, setPureMemoryEnabledState] = useState(true);
-  const [clipboardCaptureEnabled, setClipboardCaptureEnabledState] = useState(false);
+  const [activityAgentEnabled, setActivityAgentEnabledState] = useState(true);
   const [hermesSkills, setHermesSkills] = useState([]);
   const [hermesSkillsLoading, setHermesSkillsLoading] = useState(false);
   const [hermesSkillsSaving, setHermesSkillsSaving] = useState("");
@@ -135,13 +134,9 @@ export function SettingsDialog({ open, onOpenChange }) {
       setModelsFetchedAt(cached.fetchedAt);
       loadEmbeddingModel();
       invokeTauri("get_local_model_path").then((p) => setGgufPath(p || ""));
-      fetch(`${getSettings().apiUrl}/api/settings/purememory`)
+      fetch(`${getSettings().apiUrl}/api/settings/activity-agent`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((d) => d && setPureMemoryEnabledState(d.enabled))
-        .catch(() => {});
-      fetch(`${getSettings().apiUrl}/api/settings/purememory-privacy`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => d && setClipboardCaptureEnabledState(d.clipboardCaptureEnabled))
+        .then((d) => d && setActivityAgentEnabledState(d.enabled))
         .catch(() => {});
       loadHermesSkills();
     }
@@ -186,31 +181,16 @@ export function SettingsDialog({ open, onOpenChange }) {
     setHermesSkillsSaving("");
   };
 
-  const togglePureMemory = async (enabled) => {
-    setPureMemoryEnabledState(enabled);
+  const toggleActivityAgent = async (enabled) => {
+    setActivityAgentEnabledState(enabled);
     try {
-      await fetch(`${getSettings().apiUrl}/api/settings/purememory`, {
+      await fetch(`${getSettings().apiUrl}/api/settings/activity-agent`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
     } catch {
       // local server unreachable — setting stays as shown, will retry to read next open
-    }
-  };
-
-  const toggleClipboardCapture = async (enabled) => {
-    setClipboardCaptureEnabledState(enabled);
-    try {
-      const res = await fetch(`${getSettings().apiUrl}/api/settings/purememory-privacy`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      if (!res.ok) throw new Error();
-    } catch {
-      // PureMemory agent not reachable — revert the shown state
-      setClipboardCaptureEnabledState(!enabled);
     }
   };
 
@@ -364,42 +344,24 @@ export function SettingsDialog({ open, onOpenChange }) {
 
           <div className="border-t border-border" />
 
-          {/* PureMemory activity capture */}
+          {/* Native activity capture (Rust UI-Automation agent) */}
           <section className="space-y-4">
-            <h3 className="font-serif text-base text-ink">Activity capture (PureMemory)</h3>
+            <h3 className="font-serif text-base text-ink">Activity capture</h3>
             <p className="text-xs text-muted-foreground">
-              Auto-starts the local PureMemory collector-agent alongside Chronicle's server, feeding raw
-              clipboard/app-focus/file activity into your activity objects. Only the capture layer is used —
-              its own AI summarization is never touched.
+              Auto-starts Chronicle's own activity-agent alongside the server: it watches the Windows foreground
+              window via UI Automation and turns each focus session's visible text into an activity object.
+              Window title + visible UI text only — never clipboard content.
             </p>
             <label className="flex items-center gap-2 text-sm text-ink">
               <input
                 type="checkbox"
-                data-testid="puremind-toggle"
-                checked={pureMemoryEnabled}
-                onChange={(e) => togglePureMemory(e.target.checked)}
+                data-testid="activity-agent-toggle"
+                checked={activityAgentEnabled}
+                onChange={(e) => toggleActivityAgent(e.target.checked)}
                 className="h-4 w-4 rounded border-border"
               />
-              Start the collector-agent with Chronicle
+              Start the activity-agent with Chronicle
             </label>
-
-            <div className="pt-1 space-y-1.5">
-              <label className="flex items-center gap-2 text-sm text-ink">
-                <input
-                  type="checkbox"
-                  data-testid="clipboard-capture-toggle"
-                  checked={clipboardCaptureEnabled}
-                  onChange={(e) => toggleClipboardCapture(e.target.checked)}
-                  className="h-4 w-4 rounded border-border"
-                />
-                Store clipboard text content
-              </label>
-              <p className="text-[11px] text-muted-foreground/70">
-                Off by default: only that a copy happened is recorded (app, timestamp, character count) — never
-                the text itself. Regardless of this setting, anything shaped like a password (a single token with
-                mixed case/digits/symbols) is never stored.
-              </p>
-            </div>
           </section>
 
           <div className="border-t border-border" />

@@ -192,12 +192,12 @@ function startBackgroundJobs() {
   setTimeout(runAutoHealEmbeddings, 10000);  // 10 seconds after startup
   setTimeout(consolidateKenmerken, 12000);   // 12 seconds after startup
 
-  // Screenpipe is gated behind its own subscription now and unusable — not
-  // started. PureMemory is the active activity-capture source instead.
-  // Best-effort — if the PureMemory agent isn't running, this just fails
-  // silently on each poll and retries, same as the rest of Chronicle's
-  // local-server-optional features.
-  startPureMemoryIngest();
+  // Screenpipe is gated behind its own subscription now and unusable, and
+  // PureMemory's external Go collector-agent has been replaced by
+  // activity-agent (native Rust, UI-Automation-based) — best-effort, same
+  // never-block-startup posture as the rest of Chronicle's local-agent-
+  // optional features.
+  startActivityAgent();
 }
 
 module.exports = {

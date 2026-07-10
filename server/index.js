@@ -18,6 +18,7 @@ const { TOKEN, requireAuth } = require("./auth");
 const { startBackgroundJobs } = require("./jobs");
 const { readInbox, writeInbox, pushToInbox } = require("./inboxStore");
 const { startGaiaHermes, stopGaiaHermes, registerSpecialistsMcp } = require("./gaia-backend/gaiaHermesManager");
+const { stopActivityAgent } = require("./activityAgentManager");
 
 const gaiaHermesRouter = require("./routes/gaiaHermes");
 const settingsRouter = require("./routes/settings");
@@ -25,6 +26,7 @@ const personaRouter = require("./routes/persona");
 const embeddingRouter = require("./routes/embedding");
 const specialistRouter = require("./routes/specialist");
 const gaiaHermesProxyRouter = require("./routes/gaiaHermesProxy");
+const activityRouter = require("./routes/activity");
 
 const HOST = "127.0.0.1"; // localhost-only — never 0.0.0.0
 const PORT = process.env.CHRONICLE_PORT || 4577;
@@ -72,6 +74,7 @@ app.use("/api/persona", personaRouter);
 app.use("/api/specialist", specialistRouter);
 app.use("/api/objects", embeddingRouter); // POST /api/objects/:objectId/embed
 app.use("/api/settings/gaia-hermes", gaiaHermesProxyRouter);
+app.use("/api/activity", activityRouter);
 
 // Extension → queue a chat object
 app.post("/api/objects/import", requireAuth, (req, res) => {
@@ -142,6 +145,7 @@ const server = app.listen(PORT, HOST, () => {
 function shutdown() {
   console.log("\n  Shutting down Chronicle...");
   stopGaiaHermes();
+  stopActivityAgent();
   server.close(() => process.exit(0));
 }
 
