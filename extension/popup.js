@@ -85,10 +85,6 @@ function scrapeConversation(provider) {
   } catch (err) {
     // ignore
   }
-  if (!occurredAt) {
-    occurredAt = new Date().toISOString();
-  }
-
   const title = document.title || "";
   return { turns, title, url: location.href, occurredAt };
 }

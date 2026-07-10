@@ -45,7 +45,7 @@ export async function pollInbox() {
         source: it.source || "extension",
         sourceProvider: it.sourceProvider || null,
         sourceUrl: it.url || null,
-        occurredAt: it.occurredAt || it.queuedAt || null,
+        occurredAt: it.occurredAt || null,
       });
       created++;
       // Best-effort — doesn't block the import if the local server or the
