@@ -143,6 +143,32 @@ export const kennisGebruik = pgTable("persona_kenmerk_gebruik", {
   gebruiktOp: timestamp("gebruikt_op", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// A pending "Gaia wants to talk about this" flag — deliberately its own
+// table, not a sixth statusMarkeringEnum value. status_markering is a
+// documented five-value vocabulary (Manifest V6 §5, see above); a proactive
+// topic isn't a kenmerk's own lifecycle state, it's a note pointing at one
+// or two kenmerken that a human needs to look at. Two producers today: the
+// background consolidator (kind "contradiction", when two candidate-merge
+// kenmerken turn out to actually disagree rather than just being similar
+// text) and new-kenmerk insertion (kind "notable_fact", a single
+// high-confidence factual claim worth surfacing immediately). resolvedAt is
+// a plain timestamp, not a workflow state, matching this schema's existing
+// preference for simple flags (e.g. persona_instelling) over multi-step
+// status machines for anything that isn't the core kenmerk ladder itself.
+export const gaiaTopicKindEnum = pgEnum("gaia_topic_kind", ["contradiction", "notable_fact"]);
+
+export const gaiaProactiveTopic = pgTable("gaia_proactive_topic", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: gaiaTopicKindEnum("kind").notNull(),
+  // Gaia's opening line, already fully composed — the frontend displays this
+  // as-is as the first message when the floating chat auto-opens, no further
+  // LLM call needed to phrase it.
+  summary: text("summary").notNull(),
+  kenmerkIds: uuid("kenmerk_ids").array().notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});
+
 // --------------------------------------------------------------------------
 // Generic content-search layer — same local Qwen3-Embedding-0.6B (1024 dims)
 // as persona_kenmerk. Two granularities on purpose: a chunk-level hit tells

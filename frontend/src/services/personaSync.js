@@ -175,7 +175,7 @@ export async function detectPersonaKenmerken(limit = 30) {
 
     // Only scan objects updated since the last detection run
     const objectsToProcess = allObjects.filter((o) => {
-      return !o.lastProcessedForPersonaAt || (o.updatedAt && o.updatedAt > o.lastProcessedForPersonaAt);
+      return !o.processedAt || (o.updatedAt && o.updatedAt > o.processedAt);
     }).slice(0, limit);
 
     if (!objectsToProcess.length) return 0;
@@ -204,7 +204,7 @@ export async function detectPersonaKenmerken(limit = 30) {
     const scanTime = new Date().toISOString();
     for (const o of objectsToProcess) {
       await objectRepository.update(o.id, {
-        lastProcessedForPersonaAt: scanTime,
+        processedAt: scanTime,
         updatedAt: o.updatedAt, // preserve original updatedAt
       });
     }

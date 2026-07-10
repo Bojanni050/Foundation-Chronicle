@@ -47,6 +47,10 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [ggufSaveState, setGgufSaveState] = useState(null); // null | saving | saved
   const [pureMemoryEnabled, setPureMemoryEnabledState] = useState(true);
   const [clipboardCaptureEnabled, setClipboardCaptureEnabledState] = useState(false);
+  const [hermesSkills, setHermesSkills] = useState([]);
+  const [hermesSkillsLoading, setHermesSkillsLoading] = useState(false);
+  const [hermesSkillsSaving, setHermesSkillsSaving] = useState("");
+  const [hermesSkillsError, setHermesSkillsError] = useState("");
 
   const handleSeed = async () => {
     setSeedBusy(true);
@@ -139,9 +143,48 @@ export function SettingsDialog({ open, onOpenChange }) {
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => d && setClipboardCaptureEnabledState(d.clipboardCaptureEnabled))
         .catch(() => {});
+      loadHermesSkills();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const loadHermesSkills = async () => {
+    setHermesSkillsLoading(true);
+    setHermesSkillsError("");
+    try {
+      const res = await fetch(`${getSettings().apiUrl}/api/settings/gaia-hermes/skills`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setHermesSkills(Array.isArray(data.skills) ? data.skills : []);
+    } catch (err) {
+      setHermesSkills([]);
+      setHermesSkillsError(`Hermes-skills konden niet worden geladen (${err.message}).`);
+    }
+    setHermesSkillsLoading(false);
+  };
+
+  const toggleHermesSkill = async (name, enabled) => {
+    const previous = hermesSkills;
+    const next = hermesSkills.map((skill) => (skill.name === name ? { ...skill, enabled } : skill));
+    setHermesSkills(next);
+    setHermesSkillsSaving(name);
+    setHermesSkillsError("");
+    try {
+      const enabledMap = Object.fromEntries(next.map((skill) => [skill.name, skill.enabled === true]));
+      const res = await fetch(`${getSettings().apiUrl}/api/settings/gaia-hermes/skills`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: enabledMap }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setHermesSkills(Array.isArray(data.skills) ? data.skills : next);
+    } catch (err) {
+      setHermesSkills(previous);
+      setHermesSkillsError(`Skillinstelling kon niet worden opgeslagen (${err.message}).`);
+    }
+    setHermesSkillsSaving("");
+  };
 
   const togglePureMemory = async (enabled) => {
     setPureMemoryEnabledState(enabled);
@@ -429,6 +472,57 @@ export function SettingsDialog({ open, onOpenChange }) {
               />
               Route Gaia's chat through her Hermes-backend
             </label>
+
+            <div className="pt-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Hermes skills
+                </label>
+                <button
+                  type="button"
+                  onClick={loadHermesSkills}
+                  disabled={hermesSkillsLoading}
+                  data-testid="refresh-hermes-skills-btn"
+                  className="text-muted-foreground hover:text-ink disabled:opacity-40"
+                  title="Skills opnieuw uitlezen uit Hermes"
+                >
+                  {hermesSkillsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-foreground/70">
+                Alleen aangevinkte skills worden aan Gaia aangeboden. Nieuwe Hermes-skills staan standaard uit.
+              </p>
+              {hermesSkillsError && (
+                <p className="text-xs text-destructive" data-testid="hermes-skills-error">{hermesSkillsError}</p>
+              )}
+              {!hermesSkillsLoading && !hermesSkillsError && hermesSkills.length === 0 && (
+                <p className="text-xs text-muted-foreground">Hermes heeft geen skills gerapporteerd.</p>
+              )}
+              <div className="space-y-1.5">
+                {hermesSkills.map((skill) => (
+                  <label
+                    key={skill.name}
+                    className="flex items-start gap-2.5 rounded-lg border border-border bg-card/40 px-3 py-2 hover:bg-card/70"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={skill.enabled === true}
+                      disabled={hermesSkillsSaving === skill.name}
+                      onChange={(e) => toggleHermesSkill(skill.name, e.target.checked)}
+                      data-testid={`hermes-skill-${skill.name}`}
+                      className="mt-0.5 h-4 w-4 rounded border-border"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2 text-sm text-ink">
+                        {skill.label || skill.name}
+                        {hermesSkillsSaving === skill.name && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">{skill.description || skill.name}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
           </section>
 
           <div className="border-t border-border" />

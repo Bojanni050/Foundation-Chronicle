@@ -7,6 +7,7 @@ import { objectRepository } from "@/repositories";
 import { getSettings } from "@/lib/settings";
 import { pollInbox } from "@/services/inboxSync";
 import { findRelatedLocal } from "@/services/weave";
+import { checkGaiaProactiveTopics } from "@/services/gaiaProactive";
 import { Sidebar } from "@/components/Sidebar";
 import { ObjectList } from "@/components/ObjectList";
 import { ObjectDetail } from "@/components/ObjectDetail";
@@ -36,6 +37,8 @@ export default function App() {
 
   const [dlg, setDlg] = useState({ search: false, import: false, chat: false, settings: false, pulse: false, persona: false, specialist: false, graph: false, addType: false, engine: false });
   const [resumeChat, setResumeChat] = useState(null); // object to resume in ChatDialog
+  const [proactiveTopic, setProactiveTopic] = useState(null); // Gaia-initiated conversation, if any
+  const [hasPendingTopic, setHasPendingTopic] = useState(false);
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -86,6 +89,30 @@ export default function App() {
     return () => clearInterval(id);
   }, [sync]);
 
+  // Gaia-initiated conversations — lower urgency than the 5s inbox poll, and
+  // the consolidator that produces these only runs every 5 minutes anyway.
+  // Auto-opens the chat widget only on the rising edge (no pending topic →
+  // now there is one), same "don't force back open every tick" spirit as the
+  // weave auto-open effect below — not on every single poll while one stays
+  // unresolved (e.g. because the user is mid-conversation elsewhere).
+  const hadPendingTopicRef = useRef(false);
+  useEffect(() => {
+    const poll = async () => {
+      const topics = await checkGaiaProactiveTopics();
+      if (!Array.isArray(topics)) return; // local server unreachable — try again next tick
+      const first = topics[0] || null;
+      setHasPendingTopic(topics.length > 0);
+      setProactiveTopic(first);
+      if (first && !hadPendingTopicRef.current) {
+        setDlg((d) => ({ ...d, chat: true }));
+      }
+      hadPendingTopicRef.current = topics.length > 0;
+    };
+    const id = setInterval(poll, 30000);
+    poll();
+    return () => clearInterval(id);
+  }, []);
+
   const selectedObject = allObjects.find((o) => o.id === selectedId) || null;
 
   // The AI weave panel is hidden by default and opens automatically only when
@@ -130,7 +157,12 @@ export default function App() {
   }, []);
 
   const onDelete = useCallback(async (id) => {
-    await objectRepository.delete(id);
+    try {
+      await objectRepository.delete(id);
+    } catch (err) {
+      toast.error(err.message || "Could not delete object");
+      return;
+    }
     if (selectedId === id) setSelectedId(null);
     await refresh();
     toast("Object deleted");
@@ -253,7 +285,32 @@ export default function App() {
           if (!v) setResumeChat(null);
         }}
         resumeObject={resumeChat}
+        proactiveTopic={proactiveTopic}
       />
+
+      {/* Gaia bubble — always-available, independent trigger for the floating
+          chat widget (in addition to the sidebar's "AI Chat (Gaia)" entry).
+          Hidden while the widget itself is open to avoid overlapping it.
+          Centered on the third column's left border (Sidebar 264px +
+          ObjectList 360px = 624px in), vertically centered on the viewport —
+          straddling the seam between ObjectList and the main detail pane. */}
+      {!dlg.chat && (
+        <button
+          onClick={() => setDlg((d) => ({ ...d, chat: true }))}
+          data-testid="gaia-chat-bubble"
+          title="Chat with Gaia"
+          className="fixed left-[624px] top-1/2 z-40 flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-background shadow-2xl border border-border hover:scale-105 transition-transform overflow-hidden"
+        >
+          <img src="/gaia-avatar.jpg" alt="Gaia" className="h-full w-full object-cover object-top" />
+          {hasPendingTopic && (
+            <span
+              data-testid="gaia-topic-pulse"
+              className="absolute top-1 right-1 h-3 w-3 rounded-full bg-primary animate-pulse ring-2 ring-background"
+              title="Gaia wil iets bespreken"
+            />
+          )}
+        </button>
+      )}
       <PersonaDialog open={dlg.persona} onOpenChange={(v) => setDlg((d) => ({ ...d, persona: v }))} />
       <SpecialistDialog open={dlg.specialist} onOpenChange={(v) => setDlg((d) => ({ ...d, specialist: v }))} />
       <GraphDialog

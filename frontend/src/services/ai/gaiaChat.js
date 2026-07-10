@@ -5,6 +5,7 @@
 import { getSettings } from "@/lib/settings";
 import { slugify } from "@/lib/typeRegistry";
 import { chat, chatMessage } from "./core";
+import { runGaiaTurn } from "./runGaia";
 
 export async function chatWithHermes(messages) {
   return chatWithGaia(messages);
@@ -40,12 +41,36 @@ async function resolveGaiaEndpoint(apiUrl) {
   };
 }
 
-export async function chatWithGaia(messages) {
+export async function chatWithGaia(messages, sessionId = null, hermesCallbacks = {}) {
   const { models, apiUrl, gaiaHermesEnabled } = getSettings();
-  let gaiaEndpoint = {};
+
+  // Hermes-routed turns go through the approval-capable run-based API
+  // (runGaia.js) instead of the plain chat/completions path used below.
+  // /v1/runs has no `tools` parameter, so specialists are offered to Gaia
+  // via the gaia-specialists MCP server (see specialistsMcpServer.js)
+  // instead of the manual tools array built further down — Hermes resolves
+  // those tool calls itself, Chronicle never sees them.
   if (gaiaHermesEnabled) {
-    gaiaEndpoint = await resolveGaiaEndpoint(apiUrl);
+    await resolveGaiaEndpoint(apiUrl); // throws early if Hermes isn't reachable/configured
+    const history = messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
+    const userMessage = messages[messages.length - 1]?.content || "";
+    const { output } = await runGaiaTurn({
+      userMessage,
+      conversationHistory: history,
+      sessionId,
+      instructions:
+        "You are Gaia, Chronicle's helpful, context-aware AI assistant — a local-first personal knowledge app. " +
+        "Maintain a supportive, clear, and highly professional tone. " +
+        "At the very end of your response, always propose exactly 2 or 3 short, contextually relevant follow-up " +
+        "questions, formatted exactly like this: [Doorvragen: Vraag 1 | Vraag 2 | Vraag 3]. Do not put any other " +
+        "text after this brackets block.",
+      onDelta: hermesCallbacks.onDelta,
+      onToolProgress: hermesCallbacks.onToolProgress,
+      onApprovalRequest: hermesCallbacks.onApprovalRequest,
+    });
+    return output;
   }
+
   let traitsText = "";
   try {
     if (apiUrl) {
@@ -102,9 +127,7 @@ export async function chatWithGaia(messages) {
     formattedMessages,
     tools.length ? { tools, tool_choice: "auto", temperature: 0.7 } : { temperature: 0.7 },
     models.chat,
-    "chat",
-    gaiaEndpoint.customEndpoint,
-    gaiaEndpoint.customKey
+    "chat"
   );
 
   if (!firstMessage.tool_calls || !firstMessage.tool_calls.length) {
@@ -155,9 +178,7 @@ export async function chatWithGaia(messages) {
     followUpMessages,
     { temperature: 0.7 },
     models.chat,
-    "chat",
-    gaiaEndpoint.customEndpoint,
-    gaiaEndpoint.customKey
+    "chat"
   );
 }
 // Direct specialist conversation — used when the user opens a specialist tab

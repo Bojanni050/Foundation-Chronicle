@@ -12,7 +12,7 @@ import { getSettings } from "@/lib/settings";
 // opted into "use local model" in Settings, every call transparently routes
 // to their local llama-server sidecar instead of OpenRouter — same call
 // shape, no API key needed, fully optional and off by default.
-export async function chatMessage(messages, extra = {}, model, context = "unknown", customEndpoint = null, customKey = null) {
+export async function chatMessage(messages, extra = {}, model, context = "unknown", customEndpoint = null, customKey = null, extraHeaders = null) {
   const { openrouterKey, models, useLocalModel, localModelUrl } = getSettings();
 
   let endpoint;
@@ -37,6 +37,7 @@ export async function chatMessage(messages, extra = {}, model, context = "unknow
       "Content-Type": "application/json",
       "HTTP-Referer": window.location.origin,
       "X-Title": "Chronicle",
+      ...extraHeaders,
     },
     body: JSON.stringify({ model: activeModel, messages, ...extra }),
   });

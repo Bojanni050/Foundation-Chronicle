@@ -1,17 +1,30 @@
 require("dotenv").config();
 
+// Global safety net: a crash anywhere in an async/background path (Gaia's
+// Hermes subprocess wiring, background jobs, etc.) must never take down the
+// whole Chronicle server — that's a much bigger blast radius than whatever
+// actually failed. Anything genuinely fatal to Express itself still surfaces
+// via its own request-handler error path, unaffected by this.
+process.on("uncaughtException", (err) => {
+  console.error("[Chronicle] Uncaught exception (server stays up):", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[Chronicle] Unhandled promise rejection (server stays up):", reason);
+});
+
 const express = require("express");
 const cors = require("cors");
 const { TOKEN, requireAuth } = require("./auth");
 const { startBackgroundJobs } = require("./jobs");
-const { readInbox, writeInbox } = require("./inboxStore");
-const { startGaiaHermes, stopGaiaHermes } = require("./gaia-backend/gaiaHermesManager");
+const { readInbox, writeInbox, pushToInbox } = require("./inboxStore");
+const { startGaiaHermes, stopGaiaHermes, registerSpecialistsMcp } = require("./gaia-backend/gaiaHermesManager");
 
 const gaiaHermesRouter = require("./routes/gaiaHermes");
 const settingsRouter = require("./routes/settings");
 const personaRouter = require("./routes/persona");
 const embeddingRouter = require("./routes/embedding");
 const specialistRouter = require("./routes/specialist");
+const gaiaHermesProxyRouter = require("./routes/gaiaHermesProxy");
 
 const HOST = "127.0.0.1"; // localhost-only — never 0.0.0.0
 const PORT = process.env.CHRONICLE_PORT || 4577;
@@ -41,6 +54,14 @@ app.use((req, res, next) => {
   next();
 });
 
+// Mounted BEFORE express.json(): the MCP SDK's StreamableHTTPServerTransport
+// needs to read the raw request stream itself. Running express.json() first
+// consumes/ends that stream before the transport ever sees it, which hangs
+// every request indefinitely (no error, just a stuck connection) — this is
+// why it must sit ahead of the body-parsing middleware below, not after it
+// alongside the other /api/* sub-routers.
+app.use("/mcp/specialists", require("./gaia-backend/specialistsMcpServer"));
+
 app.use(express.json({ limit: "10mb" }));
 
 // Mount Sub-routers. Gaia Hermes goes first so its guarded chat proxy shadows
@@ -50,14 +71,14 @@ app.use("/api/settings", settingsRouter);
 app.use("/api/persona", personaRouter);
 app.use("/api/specialist", specialistRouter);
 app.use("/api/objects", embeddingRouter); // POST /api/objects/:objectId/embed
+app.use("/api/settings/gaia-hermes", gaiaHermesProxyRouter);
 
 // Extension → queue a chat object
 app.post("/api/objects/import", requireAuth, (req, res) => {
   const { title, content, sourceProvider, url, tags, turns, occurredAt } = req.body || {};
   if (!content) return res.status(400).json({ error: "content required" });
-  const inbox = readInbox();
   const objectId = "inbox_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
-  inbox.push({
+  pushToInbox({
     objectId,
     type: "chat",
     source: "extension",
@@ -73,7 +94,6 @@ app.post("/api/objects/import", requireAuth, (req, res) => {
     queuedAt: new Date().toISOString(),
     occurredAt: occurredAt || null,
   });
-  writeInbox(inbox);
   res.status(201).json({ success: true, objectId });
 });
 
@@ -112,6 +132,11 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`\n  Chronicle local API running at http://${HOST}:${PORT}`);
   console.log(`  Token: ${TOKEN}`);
   console.log(`  (paste this token into the extension popup & the app Settings)\n`);
+
+  // Only safe to register now: `hermes mcp add` connects to this URL
+  // immediately to discover tools, so it needs Chronicle actually listening.
+  // Fire-and-forget — this must never delay or block startup.
+  registerSpecialistsMcp();
 });
 
 function shutdown() {

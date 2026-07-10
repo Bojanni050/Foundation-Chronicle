@@ -1,3 +1,6 @@
+// Discovers Hermes skills available to Gaia's self-contained backend and
+// persists which ones are enabled. New skills default to disabled — Gaia
+// must never gain a capability silently just because Hermes picked it up.
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
@@ -20,12 +23,12 @@ function readSkillDescription(skillDir) {
         .map((line) => line.trim())
         .find((line) => line && !line.startsWith("#") && !line.startsWith("---"));
       if (description) return description.slice(0, 240);
-    } catch {
-      // Try the next conventional entrypoint.
+    } catch {xt conventional entrypoint.
     }
   }
   return "Hermes skill";
-}
+
+      // Try the ne}
 
 function scanSkillDirectory(root) {
   if (!root || !fs.existsSync(root)) return [];
@@ -88,6 +91,7 @@ function discoverViaCli() {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 5000,
+        shell: process.platform === "win32", // resolve "hermes" from PATH on Windows
       });
       const skills = parseCliSkillList(output);
       if (skills.length) return skills;
