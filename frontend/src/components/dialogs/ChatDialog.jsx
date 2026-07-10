@@ -11,7 +11,6 @@ import {
   Sparkles,
   User,
   Trash2,
-  Cpu,
   Loader2,
   BrainCircuit,
   Bot,
@@ -22,6 +21,7 @@ import { getSettings } from "@/lib/settings";
 import { objectRepository } from "@/repositories";
 import { embedObject } from "@/services/objectEmbedding";
 import { createKennisObject } from "@/services/personaSync";
+import { resolveGaiaProactiveTopic } from "@/services/gaiaProactive";
 import { GaiaQuickActions } from "@/components/GaiaQuickActions";
 import { GaiaActivityPanel } from "@/components/GaiaActivityPanel";
 import { toast } from "sonner";
@@ -208,7 +208,7 @@ function ChatPane({ tabId, isGaia, specialistName, onSendMessage, messages, send
 // ─── Main ChatDialog ──────────────────────────────────────────────────────────
 const GAIA_TAB = "__gaia__";
 
-export function ChatDialog({ open, onOpenChange, resumeObject }) {
+export function ChatDialog({ open, onOpenChange, resumeObject, proactiveTopic }) {
   // Tab state — each tab: { id, label, isGaia, specialistName?, messages[] }
   const [tabs, setTabs] = useState([
     { id: GAIA_TAB, label: "Gaia", isGaia: true, messages: [] },
@@ -250,6 +250,7 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
   // turn 10, again at turn 15, etc. — same info, same entry, duplicated.
   const consolidatedUpToRef = useRef(0);
   const resumedIdRef = useRef(null); // avoid re-loading the same object on re-renders
+  const handledTopicIdRef = useRef(null); // avoid re-seeding the same proactive topic on re-renders
 
   const [extractedKenmerken, setExtractedKenmerken] = useState([]);
   const [extractedKennis, setExtractedKennis] = useState([]);
@@ -312,6 +313,26 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
       )
     );
   };
+
+  // ── Gaia-initiated conversation ─────────────────────────────────────────
+  // App.js auto-opens this widget with a proactiveTopic when the background
+  // consolidator flags a contradiction or a notable new fact. Seeds Gaia's
+  // opening line directly (no LLM call — the summary is already fully
+  // composed server-side). Only seeds into an empty Gaia tab — never
+  // overwrites a conversation already in progress. Only marked resolved
+  // once actually seeded: if the tab was busy, handledTopicIdRef is left
+  // untouched so the same still-unresolved topic gets another chance on a
+  // later poll (App.js keeps re-sending it as `proactiveTopic` until it's
+  // resolved), instead of silently dropping it.
+  useEffect(() => {
+    if (!open || !proactiveTopic || proactiveTopic.id === handledTopicIdRef.current) return;
+    if (getTabMessages(GAIA_TAB).length > 0) return;
+    handledTopicIdRef.current = proactiveTopic.id;
+    setTabMessages(GAIA_TAB, [{ role: "assistant", content: proactiveTopic.summary }]);
+    setActiveTab(GAIA_TAB);
+    resolveGaiaProactiveTopic(proactiveTopic.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, proactiveTopic]);
 
   // ── Open a specialist tab (idempotent — focus if already open) ─────────────
   const openSpecialistTab = useCallback((specialistName) => {
@@ -529,38 +550,42 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
 
   return (
     <>
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-4xl h-[75vh] flex p-0 overflow-hidden">
-
+    {/* Floating, non-modal chat widget — fixed bottom-right, no overlay/focus
+        trap, so the rest of the app stays interactive while it's open. Not a
+        Dialog: Gaia should be able to pop this open on her own (see App.js's
+        proactive-topic polling) without blocking whatever else is on screen. */}
+    {open && (
+      <div
+        data-testid="gaia-floating-chat"
+        className={`fixed bottom-6 right-6 z-50 flex h-[600px] max-h-[calc(100vh-3rem)] max-w-[calc(100vw-3rem)] overflow-hidden rounded-xl border border-border bg-background shadow-2xl transition-[width] duration-150 ${
+          showKennisPanel ? "w-[700px]" : "w-[420px]"
+        }`}
+      >
         {/* ── Left: chat column ─────────────────────────────────────────── */}
-        <div className="flex-1 min-w-0 flex flex-col p-6 overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-col p-4 overflow-hidden">
 
           {/* Header */}
-          <DialogHeader className="border-b border-border/60 pb-3 shrink-0">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl overflow-hidden bg-primary/10">
+          <div className="border-b border-border/60 pb-3 shrink-0">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl overflow-hidden bg-primary/10">
                   <GaiaAvatar size="sm" />
                 </div>
-                <div>
-                  <DialogTitle className="font-serif text-lg text-ink">Chat with Gaia</DialogTitle>
+                <div className="min-w-0">
+                  <h2 className="font-serif text-base text-ink">Chat with Gaia</h2>
                   {resumeBanner ? (
                     <p className="text-[11px] text-primary flex items-center gap-1 animate-pulse">
                       <MessageSquare className="w-3 h-3" />
                       Hervat: {resumeBanner.title}
                     </p>
                   ) : (
-                    <p className="text-[11px] text-muted-foreground">
-                      Interactive conversation powered by your local memory context.
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {activeModel.replace("nousresearch/", "")}
                     </p>
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-3 pr-6">
-                <div className="flex items-center gap-1.5 rounded-lg border border-border bg-accent/20 px-2.5 py-1 text-[10px] text-muted-foreground font-mono">
-                  <Cpu className="w-3.5 h-3.5 text-primary" />
-                  <span>{activeModel.replace("nousresearch/", "")}</span>
-                </div>
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={() => setShowKennisPanel((v) => !v)}
                   className={`rounded-lg p-1.5 transition-all ${
@@ -579,6 +604,14 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
                     <Trash2 className="w-4 h-4" />
                   </button>
                 )}
+                <button
+                  onClick={() => handleOpenChange(false)}
+                  data-testid="close-chat-btn"
+                  aria-label="Close"
+                  className="rounded-lg p-1.5 text-muted-foreground hover:text-ink hover:bg-accent/40 transition-all"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             </div>
 
@@ -620,7 +653,7 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
                 ))}
               </div>
             )}
-          </DialogHeader>
+          </div>
 
           {/* ── Chat pane for active tab ─────────────────────────────────── */}
           <div className="flex-1 min-h-0 flex flex-col pt-4 overflow-hidden">
@@ -699,8 +732,8 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
             </div>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    )}
 
     {/* Hermes approval prompt — Gaia's Hermes backend blocks mid-turn until
         one of these choices is posted back (see runGaia.js/onApprovalRequest).
