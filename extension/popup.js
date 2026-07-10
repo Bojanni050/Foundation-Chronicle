@@ -70,8 +70,27 @@ function scrapeConversation(provider) {
     }
   }
 
+  let occurredAt = null;
+  try {
+    const timeEl = document.querySelector('time, [class*="timestamp"], [class*="time"]');
+    if (timeEl) {
+      const dt = timeEl.getAttribute('datetime') || timeEl.getAttribute('title') || timeEl.innerText;
+      if (dt && dt.trim()) {
+        const parsedDate = new Date(dt.trim());
+        if (!isNaN(parsedDate.getTime())) {
+          occurredAt = parsedDate.toISOString();
+        }
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+  if (!occurredAt) {
+    occurredAt = new Date().toISOString();
+  }
+
   const title = document.title || "";
-  return { turns, title, url: location.href };
+  return { turns, title, url: location.href, occurredAt };
 }
 
 function formatTurns(turns) {
@@ -114,7 +133,14 @@ async function doSend() {
     const res = await fetch(`${apiUrl}/api/objects/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ title, content, sourceProvider: provider, url: result.url }),
+      body: JSON.stringify({
+        title,
+        content,
+        turns: result.turns, // structured role/text, for message-level embedding server-side
+        sourceProvider: provider,
+        url: result.url,
+        occurredAt: result.occurredAt,
+      }),
     });
     if (res.status === 201) {
       setStatus("ok", `Sent ${result.turns.length} turns to Chronicle ✓`);

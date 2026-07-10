@@ -33,7 +33,9 @@ function tryClaude(data) {
   return {
     title: titleFromTurns(turns, conv.name),
     content: formatTurns(turns),
+    turns,
     sourceProvider: "claude",
+    occurredAt: conv.created_at || null,
   };
 }
 
@@ -64,7 +66,9 @@ function tryChatGPT(data) {
   return {
     title: titleFromTurns(turns, conv.title),
     content: formatTurns(turns),
+    turns,
     sourceProvider: "chatgpt",
+    occurredAt: conv.create_time ? new Date(conv.create_time * 1000).toISOString() : null,
   };
 }
 
@@ -118,6 +122,7 @@ function tryMarkdown(text) {
     return {
       title: titleFromTurns(validTurns),
       content: formatTurns(validTurns),
+      turns: validTurns,
       sourceProvider: null,
     };
   }
@@ -150,13 +155,16 @@ function parsePlain(text) {
     return {
       title: titleFromTurns(turns),
       content: formatTurns(turns),
+      turns,
       sourceProvider: null,
     };
   }
-  // fallback: store raw content unchanged
+  // fallback: store raw content unchanged — no turn structure to embed at
+  // message level, object-level embedding still applies to the raw content.
   return {
     title: truncate(text, 90) || "Imported chat",
     content: (text || "").trim(),
+    turns: [],
     sourceProvider: null,
   };
 }

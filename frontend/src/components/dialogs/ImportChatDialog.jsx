@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { objectRepository } from "@/repositories";
 import { parseChat, keywordTags } from "@/services/chatParser";
+import { embedObject } from "@/services/objectEmbedding";
 import { AIService } from "@/services/AIService";
 
 async function autoTags(text) {
@@ -43,14 +44,18 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
       const tags = await autoTags(parsed.content);
 
       setStatusText(`[${i + 1}/${total}] Saving ${fileLabel} to your database...`);
-      await objectRepository.create({
+      const obj = await objectRepository.create({
         type: "chat",
         title: parsed.title,
         content: parsed.content,
         tags,
         source: "import",
         sourceProvider: parsed.sourceProvider || provider || null,
+        occurredAt: parsed.occurredAt || null,
       });
+      // Best-effort message/object-level embedding — doesn't block the import
+      // if the local server or the embedding model isn't available.
+      embedObject(obj.id, parsed.turns, obj.content);
       created++;
     }
 
