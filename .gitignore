@@ -89,3 +89,7 @@ credentials.json
 
 # Gaia's self-contained Hermes backend — runtime state, .env, sessions, skills
 server/gaia-backend/.hermes-home/
+
+# Vendored native binaries (llama.cpp/ggml) for the local model sidecar —
+# large, platform-specific, not source — fetched/built separately, not committed.
+src-tauri/binaries/

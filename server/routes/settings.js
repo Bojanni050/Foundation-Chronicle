@@ -16,34 +16,10 @@ router.get("/gaia-hermes-config", (_req, res) => {
   res.json(getGaiaHermesConfig());
 });
 
-// POST /api/settings/gaia-hermes/chat/completions — server-side proxy that
-// forwards the chat/completions request to Gaia's self-contained Hermes
-// backend. The browser MUST NOT call 127.0.0.1:9120 directly: the Hermes
-// gateway issues a 403 on OPTIONS preflight requests, so every
-// browser-originated cross-origin POST will silently fail. Routing through
-// Chronicle's own backend avoids all CORS issues and keeps the API key
-// server-side, away from localStorage/devtools.
-router.post("/gaia-hermes/chat/completions", async (req, res) => {
-  const { url, key } = getGaiaHermesConfig();
-  if (!url || !key) {
-    return res.status(503).json({ error: "Gaia's Hermes-backend is not configured yet." });
-  }
-  try {
-    const target = `${url.replace(/\/+$/, "")}/chat/completions`;
-    const upstream = await fetch(target, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${key}`,
-      },
-      body: JSON.stringify(req.body),
-    });
-    const data = await upstream.json();
-    res.status(upstream.status).json(data);
-  } catch (err) {
-    res.status(502).json({ error: "Gaia's Hermes-backend is unreachable.", detail: err.message });
-  }
-});
+// gaia-hermes/chat/completions used to be proxied from here too. Removed —
+// routes/gaiaHermesProxy.js (mounted at /api/settings/gaia-hermes) is now
+// the single implementation; it also carries session tracking, reasoning
+// capture, and the enabled-skills policy gate that this older copy lacked.
 
 const PUREMEMORY_AGENT_URL = "http://127.0.0.1:45679";
 

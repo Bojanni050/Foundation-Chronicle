@@ -11,6 +11,7 @@ const settingsRouter = require("./routes/settings");
 const personaRouter = require("./routes/persona");
 const embeddingRouter = require("./routes/embedding");
 const specialistRouter = require("./routes/specialist");
+const gaiaHermesProxyRouter = require("./routes/gaiaHermesProxy");
 
 const HOST = "127.0.0.1"; // localhost-only — never 0.0.0.0
 const PORT = process.env.CHRONICLE_PORT || 4577;
@@ -47,6 +48,7 @@ app.use("/api/settings", settingsRouter);
 app.use("/api/persona", personaRouter);
 app.use("/api/specialist", specialistRouter);
 app.use("/api/objects", embeddingRouter); // POST /api/objects/:objectId/embed
+app.use("/api/settings/gaia-hermes", gaiaHermesProxyRouter);
 
 // Extension → queue a chat object
 app.post("/api/objects/import", requireAuth, (req, res) => {

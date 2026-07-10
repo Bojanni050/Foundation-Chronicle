@@ -79,6 +79,40 @@ function getGaiaHermesConfig() {
 let gaiaHermesProcess = null;
 let stoppingIntentionally = false;
 
+// Recent stdout/stderr lines from Hermes, so the chat UI can show what Gaia
+// is actually doing (tool calls, tool results, warnings) alongside her
+// answer — not just the final text. Capped ring buffer, in-memory only.
+const MAX_LOG_LINES = 200;
+let recentLogLines = [];
+
+function pushLogLine(stream, text) {
+  const line = { stream, text, at: new Date().toISOString() };
+  recentLogLines.push(line);
+  if (recentLogLines.length > MAX_LOG_LINES) {
+    recentLogLines.splice(0, recentLogLines.length - MAX_LOG_LINES);
+  }
+}
+
+function getRecentLogLines(sinceIso) {
+  if (!sinceIso) return recentLogLines;
+  return recentLogLines.filter((l) => l.at > sinceIso);
+}
+
+// Noise from Hermes' own per-turn tool-availability probing — it checks
+// every possible tool's prerequisites (browser, vision, web search, Nous
+// auxiliary) regardless of which toolsets are actually enabled for this
+// profile (only terminal+file are). Nothing actionable for Gaia's use case,
+// so it never enters the ring buffer at all.
+const NOISY_LINE_PATTERNS = [
+  /check_fn .* returned False/,
+  /Auxiliary Nous client unavailable/,
+  /Auxiliary: marking nous unhealthy/,
+];
+
+function isNoisyLine(text) {
+  return NOISY_LINE_PATTERNS.some((re) => re.test(text));
+}
+
 async function startGaiaHermes() {
   if (gaiaHermesProcess) {
     console.log("[Gaia-Hermes] Already running in this process, skipping start.");
@@ -104,11 +138,15 @@ async function startGaiaHermes() {
   writePid(gaiaHermesProcess.pid);
 
   gaiaHermesProcess.stdout.on("data", (data) => {
-    console.log(`[Gaia-Hermes] ${data.toString().trim()}`);
+    const text = data.toString().trim();
+    console.log(`[Gaia-Hermes] ${text}`);
+    pushLogLine("stdout", text);
   });
 
   gaiaHermesProcess.stderr.on("data", (data) => {
     const msg = data.toString().trim();
+    if (isNoisyLine(msg)) return; // skip entirely — not in buffer, not in console
+    pushLogLine("stderr", msg);
     // Suppress the duplicate-instance warning — it's expected transiently
     // while the previous process is finishing its shutdown.
     if (!msg.includes("already running")) {
@@ -149,4 +187,4 @@ function stopGaiaHermes() {
   clearPid();
 }
 
-module.exports = { startGaiaHermes, stopGaiaHermes, getGaiaHermesConfig, GAIA_HERMES_PORT };
+module.exports = { startGaiaHermes, stopGaiaHermes, getGaiaHermesConfig, getRecentLogLines, pushLogLine, GAIA_HERMES_PORT };
