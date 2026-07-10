@@ -38,6 +38,23 @@ async function createKenmerk(apiUrl, kenmerk, bronObjectId, soort, gevoelig) {
   return res.json();
 }
 
+/**
+ * A "categorie: algemeen" candidate is a fact/concept from content, not a
+ * claim about the owner — it doesn't need persona_kenmerk's trust ladder,
+ * just a plain, searchable "kennis" object, linked back to its source via
+ * the same `links` field ObjectDetail already shows.
+ */
+export async function createKennisObject(kenmerk, bronObjectId) {
+  return objectRepository.create({
+    type: "note",
+    title: kenmerk.length > 80 ? kenmerk.slice(0, 77) + "..." : kenmerk,
+    content: kenmerk,
+    tags: ["ai-extracted"],
+    source: "ai",
+    links: bronObjectId ? [bronObjectId] : [],
+  });
+}
+
 async function versterkKenmerk(apiUrl, id, bronObjectId) {
   const res = await fetch(`${apiUrl}/api/persona/kenmerken/${id}/versterk`, {
     method: "PATCH",
@@ -171,11 +188,15 @@ export async function detectPersonaKenmerken(limit = 30) {
     for (const c of candidates) {
       if (!c?.kenmerk || !c?.bronObjectId) continue;
       try {
-        // Server handles duplicate detection and automatically reinforces if match is found
-        await createKenmerk(apiUrl, c.kenmerk, c.bronObjectId, c.soort, c.gevoelig);
+        if (c.categorie === "algemeen") {
+          await createKennisObject(c.kenmerk, c.bronObjectId);
+        } else {
+          // Server handles duplicate detection and automatically reinforces if match is found
+          await createKenmerk(apiUrl, c.kenmerk, c.bronObjectId, c.soort, c.gevoelig);
+        }
         processed += 1;
       } catch (err) {
-        console.error("Failed to save persona candidate:", err);
+        console.error("Failed to save extracted candidate:", err);
       }
     }
 

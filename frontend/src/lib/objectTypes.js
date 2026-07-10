@@ -27,6 +27,8 @@ import {
   Rocket,
   Map,
   Palette,
+  Monitor,
+  BrainCircuit,
 } from "lucide-react";
 import { getCustomTypes } from "@/lib/typeRegistry";
 
@@ -40,6 +42,7 @@ export const OBJECT_TYPES = [
   { key: "meeting", label: "Meetings", singular: "Meeting", icon: Calendar },
   { key: "dailyLog", label: "Daily Logs", singular: "Daily Log", icon: Sun },
   { key: "chat", label: "Chats", singular: "Chat", icon: MessageSquare },
+  { key: "activity", label: "Activity", singular: "Activity Log", icon: Monitor },
 ];
 
 // Icons available when creating a custom type

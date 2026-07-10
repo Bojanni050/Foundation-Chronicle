@@ -5,7 +5,7 @@
 const KEY = "chronicle_custom_types";
 
 export const BUILTIN_TYPE_KEYS = [
-  "note", "person", "task", "idea", "book", "project", "meeting", "dailyLog", "chat",
+  "note", "person", "task", "idea", "book", "project", "meeting", "dailyLog", "chat", "activity",
 ];
 
 const RESERVED = new Set([...BUILTIN_TYPE_KEYS, "all", "untyped"]);

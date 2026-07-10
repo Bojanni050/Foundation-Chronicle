@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
-import { Waypoints, Sparkles, Loader2, RefreshCw, PanelRightClose } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Waypoints, Sparkles, Loader2, RefreshCw, PanelRightClose, BrainCircuit } from "lucide-react";
 import { findRelatedLocal } from "@/services/weave";
 import { AIService } from "@/services/AIService";
-import { getAssumptionsUsed } from "@/services/personaSync";
+import { getAssumptionsUsed, getPersonaState, createKennisObject } from "@/services/personaSync";
+import { getSettings } from "@/lib/settings";
 import { typeMeta } from "@/lib/objectTypes";
 import { displayTitle } from "@/lib/format";
 
@@ -10,6 +11,88 @@ export function AIWeave({ selectedObject, allObjects, onOpen, onRefreshInbox, sy
   const [aiIds, setAiIds] = useState(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
+  const [linkedKenmerken, setLinkedKenmerken] = useState([]);
+  const [extracting, setExtracting] = useState(false);
+  const [extractNote, setExtractNote] = useState("");
+
+  // Extracted notes (general facts) are IndexedDB objects (already in allObjects) linked back
+  // via the same `links` field ObjectDetail already shows.
+  const linkedKennis = useMemo(() => {
+    if (!selectedObject) return [];
+    return allObjects.filter(
+      (o) => o.type === "note" && (o.tags || []).includes("ai-extracted") && (o.links || []).includes(selectedObject.id)
+    );
+  }, [selectedObject, allObjects]);
+
+  // Kenmerken live in Postgres, not IndexedDB — fetched separately whenever
+  // the selection changes.
+  useEffect(() => {
+    if (!selectedObject) {
+      setLinkedKenmerken([]);
+      return;
+    }
+    let cancelled = false;
+    getPersonaState().then((state) => {
+      if (cancelled || !state) return;
+      setLinkedKenmerken(
+        state.kenmerken.filter((k) => (k.bron_object_ids || []).includes(selectedObject.id))
+      );
+    });
+    return () => { cancelled = true; };
+  }, [selectedObject]);
+
+  // Same categorie-routing as ChatDialog's live consolidation and
+  // detectPersonaKenmerken()'s background scan — persona claims go through
+  // the trust-ladder pipeline, general facts/concepts become plain kennis
+  // objects. On-demand only (a button, not automatic) — an LLM call every
+  // time an entry is opened would be wasteful.
+  const extractKnowledge = async () => {
+    if (!selectedObject || !AIService.isConfigured()) return;
+    setExtracting(true);
+    setExtractNote("");
+    try {
+      const { apiUrl } = getSettings();
+      const rejectedRes = await fetch(`${apiUrl}/api/persona/kenmerken?status=rejected`);
+      const rejected = rejectedRes.ok ? await rejectedRes.json() : [];
+      const candidates = await AIService.suggestPersonaKenmerken(rejected.slice(0, 20), [selectedObject]);
+
+      let personaCount = 0;
+      let kennisCount = 0;
+      for (const c of candidates) {
+        if (!c?.kenmerk || !c?.bronObjectId) continue;
+        if (c.categorie === "algemeen") {
+          await createKennisObject(c.kenmerk, c.bronObjectId);
+          kennisCount++;
+        } else {
+          await fetch(`${apiUrl}/api/persona/kenmerken`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              kenmerk: c.kenmerk,
+              bronObjectId: c.bronObjectId,
+              soort: c.soort,
+              gevoelig: c.gevoelig,
+            }),
+          });
+          personaCount++;
+        }
+      }
+      setExtractNote(
+        personaCount || kennisCount
+          ? `Found ${personaCount} about you, ${kennisCount} general.`
+          : "Nothing stood out in this entry."
+      );
+      // Refresh the linked-kenmerken list to reflect what was just found.
+      const state = await getPersonaState();
+      if (state) {
+        setLinkedKenmerken(state.kenmerken.filter((k) => (k.bron_object_ids || []).includes(selectedObject.id)));
+      }
+    } catch (err) {
+      setExtractNote("Extraction failed — check your AI settings.");
+    } finally {
+      setExtracting(false);
+    }
+  };
 
   const related = useMemo(() => {
     if (!selectedObject) return [];
@@ -109,6 +192,48 @@ export function AIWeave({ selectedObject, allObjects, onOpen, onRefreshInbox, sy
           </div>
         )}
       </div>
+
+      {/* Extracted knowledge — split the same way as Gaia's live panel:
+          persona claims (trust-ladder) vs. general facts/concepts (plain
+          kennis objects). On-demand extraction, not automatic per view. */}
+      {selectedObject && (
+        <div className="border-t border-border px-4 pt-3 pb-1">
+          <div className="flex items-center gap-1.5 pb-2">
+            <BrainCircuit className="w-3.5 h-3.5 text-muted-foreground" />
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+              Extracted knowledge
+            </p>
+          </div>
+          {linkedKenmerken.length === 0 && linkedKennis.length === 0 ? (
+            <p className="px-1 pb-2 text-[11px] text-muted-foreground/70">Nothing extracted from this entry yet.</p>
+          ) : (
+            <div className="space-y-1.5 pb-2 max-h-40 overflow-y-auto no-scrollbar">
+              {linkedKenmerken.map((k) => (
+                <div key={k.id} className="rounded-lg bg-accent/30 px-2.5 py-1.5 text-xs text-ink">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mr-1.5">over jou</span>
+                  {k.kenmerk}
+                </div>
+              ))}
+              {linkedKennis.map((o) => (
+                <div key={o.id} className="rounded-lg bg-accent/30 px-2.5 py-1.5 text-xs text-ink">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mr-1.5">algemeen</span>
+                  {o.content}
+                </div>
+              ))}
+            </div>
+          )}
+          {extractNote && <p className="pb-2 text-[11px] text-primary/80">{extractNote}</p>}
+          <button
+            onClick={extractKnowledge}
+            disabled={extracting}
+            data-testid="extract-knowledge-btn"
+            className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-xs text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-40"
+          >
+            {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BrainCircuit className="w-3.5 h-3.5" />}
+            Extract knowledge from this entry
+          </button>
+        </div>
+      )}
 
       {selectedObject && (
         <div className="border-t border-border p-4">
