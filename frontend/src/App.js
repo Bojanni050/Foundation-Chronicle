@@ -35,6 +35,7 @@ export default function App() {
   const [weaveOpen, setWeaveOpen] = useState(false);
 
   const [dlg, setDlg] = useState({ search: false, import: false, chat: false, settings: false, pulse: false, persona: false, specialist: false, graph: false, addType: false, engine: false });
+  const [resumeChat, setResumeChat] = useState(null); // object to resume in ChatDialog
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -196,6 +197,10 @@ export default function App() {
             object={selectedObject}
             onSaved={onSaved}
             onDelete={onDelete}
+            onResumeChat={(obj) => {
+              setResumeChat(obj);
+              setDlg((d) => ({ ...d, chat: true }));
+            }}
           />
         ) : (
           <WelcomeEmpty />
@@ -241,7 +246,14 @@ export default function App() {
       />
       <SettingsDialog open={dlg.settings} onOpenChange={(v) => setDlg((d) => ({ ...d, settings: v }))} />
       <PulseDialog open={dlg.pulse} onOpenChange={(v) => setDlg((d) => ({ ...d, pulse: v }))} />
-      <ChatDialog open={dlg.chat} onOpenChange={(v) => setDlg((d) => ({ ...d, chat: v }))} />
+      <ChatDialog
+        open={dlg.chat}
+        onOpenChange={(v) => {
+          setDlg((d) => ({ ...d, chat: v }));
+          if (!v) setResumeChat(null);
+        }}
+        resumeObject={resumeChat}
+      />
       <PersonaDialog open={dlg.persona} onOpenChange={(v) => setDlg((d) => ({ ...d, persona: v }))} />
       <SpecialistDialog open={dlg.specialist} onOpenChange={(v) => setDlg((d) => ({ ...d, specialist: v }))} />
       <GraphDialog

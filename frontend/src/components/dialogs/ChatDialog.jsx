@@ -206,17 +206,19 @@ function ChatPane({ tabId, isGaia, specialistName, onSendMessage, messages, send
 // ─── Main ChatDialog ──────────────────────────────────────────────────────────
 const GAIA_TAB = "__gaia__";
 
-export function ChatDialog({ open, onOpenChange }) {
+export function ChatDialog({ open, onOpenChange, resumeObject }) {
   // Tab state — each tab: { id, label, isGaia, specialistName?, messages[] }
   const [tabs, setTabs] = useState([
     { id: GAIA_TAB, label: "Gaia", isGaia: true, messages: [] },
   ]);
   const [activeTab, setActiveTab] = useState(GAIA_TAB);
   const [sending, setSending] = useState(false);
+  const [resumeBanner, setResumeBanner] = useState(null); // { title } shown briefly
 
   const inputRef = useRef(null);
   const chatObjectIdRef = useRef(null);
   const exchangeCountRef = useRef(0);
+  const resumedIdRef = useRef(null); // avoid re-loading the same object on re-renders
 
   const [extractedKenmerken, setExtractedKenmerken] = useState([]);
   const [extractedKennis, setExtractedKennis] = useState([]);
@@ -225,6 +227,43 @@ export function ChatDialog({ open, onOpenChange }) {
 
   const settings = getSettings();
   const activeModel = settings.models?.chat || "nousresearch/hermes-3-llama-3-8b";
+
+  // ── Load a previous conversation when resumeObject is provided ─────────────
+  // Parse the stored verbatim content ("User: ...\n\nGaia: ...") back into the
+  // messages array so the user can continue exactly where they left off.
+  useEffect(() => {
+    if (!open || !resumeObject || resumeObject.id === resumedIdRef.current) return;
+    resumedIdRef.current = resumeObject.id;
+
+    const raw = resumeObject.content || "";
+    const parsed = [];
+    // Split on double-newline blocks that start with a role prefix
+    const blocks = raw.split(/\n\n(?=(?:User|Gaia):)/);
+    for (const block of blocks) {
+      if (block.startsWith("User:")) {
+        parsed.push({ role: "user", content: block.replace(/^User:\s*/, "").trim() });
+      } else if (block.startsWith("Gaia:")) {
+        parsed.push({ role: "assistant", content: block.replace(/^Gaia:\s*/, "").trim() });
+      }
+    }
+    if (parsed.length === 0) return;
+
+    // Restore the Gaia tab with the parsed messages and link to the existing
+    // saved object so further exchanges update it (no duplicate created).
+    setTabs((prev) =>
+      prev.map((t) => (t.id === GAIA_TAB ? { ...t, messages: parsed } : t))
+    );
+    setActiveTab(GAIA_TAB);
+    chatObjectIdRef.current = resumeObject.id;
+    exchangeCountRef.current = Math.floor(parsed.length / 2);
+    setResumeBanner({ title: resumeObject.title || "Vorig gesprek" });
+    setTimeout(() => setResumeBanner(null), 3500);
+  }, [open, resumeObject]);
+
+  // Reset resumed tracker when dialog closes so a fresh open can load again
+  useEffect(() => {
+    if (!open) resumedIdRef.current = null;
+  }, [open]);
 
   const getTabMessages = (tabId) =>
     tabs.find((t) => t.id === tabId)?.messages || [];
@@ -435,9 +474,16 @@ export function ChatDialog({ open, onOpenChange }) {
                 </div>
                 <div>
                   <DialogTitle className="font-serif text-lg text-ink">Chat with Gaia</DialogTitle>
-                  <p className="text-[11px] text-muted-foreground">
-                    Interactive conversation powered by your local memory context.
-                  </p>
+                  {resumeBanner ? (
+                    <p className="text-[11px] text-primary flex items-center gap-1 animate-pulse">
+                      <MessageSquare className="w-3 h-3" />
+                      Hervat: {resumeBanner.title}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Interactive conversation powered by your local memory context.
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-3 pr-6">
