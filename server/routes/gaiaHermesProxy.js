@@ -3,8 +3,8 @@
 // returns 403 on the CORS preflight (OPTIONS), so the browser never even
 // sends the real POST. Routing through Chronicle's own already-permitted
 // origin sidesteps that entirely, and as a bonus the API key never has to
-// reach the browser at all — same pattern already used for PureMemory's
-// agent (see routes/settings.js's purememory-privacy proxy).
+// reach the browser at all — same server-side-proxy pattern used elsewhere
+// in routes/settings.js.
 const express = require("express");
 const { Readable } = require("stream");
 const { getGaiaHermesConfig, getRecentLogLines, pushLogLine } = require("../gaia-backend/gaiaHermesManager");

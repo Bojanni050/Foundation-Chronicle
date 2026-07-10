@@ -1,13 +1,13 @@
 const fs = require("fs");
 const path = require("path");
 
-// Whether Chronicle should auto-start the PureMemory collector-agent
-// alongside itself. Defaults to true ("starts with Chronicle unless turned
-// off") — persisted as a file, same pattern as embedding.js's model choice,
-// because the Node server (not just the browser) needs to read this at
-// startup, before any frontend Settings dialog has even been opened.
+// Whether Chronicle should auto-start the native activity-agent alongside
+// itself. Defaults to true — persisted as a file, same pattern as
+// embedding.js's model choice, because the Node server (not just the
+// browser) needs to read this at startup, before any frontend Settings
+// dialog has even been opened.
 const DATA_DIR = path.join(__dirname, "data");
-const CONFIG_FILE = path.join(DATA_DIR, "purememory-config.json");
+const CONFIG_FILE = path.join(DATA_DIR, "activity-agent-config.json");
 
 function readConfig() {
   try {

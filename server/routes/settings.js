@@ -2,7 +2,7 @@ const express = require("express");
 const { TOKEN } = require("../auth");
 const { getModel: getEmbeddingModel, setModel: setEmbeddingModel, MODEL_OPTIONS } = require("../embedding");
 const { reembedAllRows } = require("../reembed");
-const { isEnabled: isPureMemoryEnabled, setEnabled: setPureMemoryEnabled } = require("../purememoryConfig");
+const { isEnabled: isActivityAgentEnabled, setEnabled: setActivityAgentEnabled } = require("../activityAgentConfig");
 const { getGaiaHermesConfig } = require("../gaia-backend/gaiaHermesManager");
 
 const router = express.Router();
@@ -21,67 +21,24 @@ router.get("/gaia-hermes-config", (_req, res) => {
 // the single implementation; it also carries session tracking, reasoning
 // capture, and the enabled-skills policy gate that this older copy lacked.
 
-const PUREMEMORY_AGENT_URL = "http://127.0.0.1:45679";
-
-// GET /api/settings/purememory-privacy — proxies the agent's own privacy
-// config (the agent has its own UI at :45679 with the full picture: custom
-// prefixes, excluded domains, tags — Chronicle only surfaces the one flag
-// relevant here). A direct browser fetch to :45679 would be blocked by its
-// CORS policy anyway, so this goes through Chronicle's server instead.
-router.get("/purememory-privacy", async (_req, res) => {
-  try {
-    const r = await fetch(`${PUREMEMORY_AGENT_URL}/api/privacy`);
-    if (!r.ok) throw new Error(`agent responded ${r.status}`);
-    const data = await r.json();
-    res.json({ clipboardCaptureEnabled: !!data.clipboard_capture_enabled });
-  } catch (err) {
-    res.status(503).json({ error: "PureMemory agent not reachable", detail: err.message });
-  }
-});
-
-// PATCH /api/settings/purememory-privacy — the agent's own POST /api/privacy
-// replaces its *entire* config, so this reads the current config first and
-// merges in just the new flag — a naive one-field PATCH would silently wipe
-// out any custom prefixes/domains/tags already set there.
-router.patch("/purememory-privacy", async (req, res) => {
-  try {
-    const current = await fetch(`${PUREMEMORY_AGENT_URL}/api/privacy`);
-    if (!current.ok) throw new Error(`agent responded ${current.status}`);
-    const cfg = await current.json();
-    const merged = {
-      user_id: cfg.user_id,
-      device_id: cfg.device_id,
-      secret_prefixes: cfg.custom_prefixes || [],
-      excluded_domains: cfg.custom_domains || [],
-      tags: cfg.tags || [],
-      clipboard_capture_enabled: !!req.body?.enabled,
-    };
-    const r = await fetch(`${PUREMEMORY_AGENT_URL}/api/privacy`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(merged),
-    });
-    if (!r.ok) throw new Error(`agent responded ${r.status}`);
-    res.json({ clipboardCaptureEnabled: merged.clipboard_capture_enabled });
-  } catch (err) {
-    res.status(503).json({ error: "PureMemory agent not reachable", detail: err.message });
-  }
-});
-
 // GET /api/settings/token
 router.get("/token", (_req, res) => {
   res.json({ token: TOKEN });
 });
 
-// GET/PATCH /api/settings/purememory — whether Chronicle auto-starts the
-// PureMemory collector-agent alongside itself. Defaults to enabled.
-router.get("/purememory", (_req, res) => {
-  res.json({ enabled: isPureMemoryEnabled() });
+// GET/PATCH /api/settings/activity-agent — whether Chronicle auto-starts the
+// native activity-agent (UI-Automation-based foreground-window capture)
+// alongside itself. Defaults to enabled. No separate privacy-proxy route
+// here (unlike the old PureMemory one it replaces): activity-agent only
+// ever captures window title + visible UI text, never clipboard content, so
+// there's no extra flag to surface.
+router.get("/activity-agent", (_req, res) => {
+  res.json({ enabled: isActivityAgentEnabled() });
 });
 
-router.patch("/purememory", (req, res) => {
-  setPureMemoryEnabled(req.body?.enabled);
-  res.json({ enabled: isPureMemoryEnabled() });
+router.patch("/activity-agent", (req, res) => {
+  setActivityAgentEnabled(req.body?.enabled);
+  res.json({ enabled: isActivityAgentEnabled() });
 });
 
 // GET /api/settings/embedding-model
