@@ -25,3 +25,15 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-single-instance = "2"
+
+# UIA-based activity capture (uia_capture.rs) — already present transitively
+# via tauri/wry at 0.61.x, but without the feature flags it needs; added
+# directly here rather than relying on whatever subset a transitive dep
+# happens to enable.
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_UI_WindowsAndMessaging",
+] }

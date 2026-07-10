@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
+mod uia_capture;
+use uia_capture::{start_uia_capture, stop_uia_capture};
+
 // Local model config — a small JSON file in the app's own config dir, since
 // this is the bridge between the React settings UI (localStorage, browser
 // side) and the Rust process that actually spawns the sidecar. Kept
@@ -65,7 +68,9 @@ pub fn run() {
     .plugin(tauri_plugin_shell::init())
     .invoke_handler(tauri::generate_handler![
       get_local_model_path,
-      set_local_model_path
+      set_local_model_path,
+      start_uia_capture,
+      stop_uia_capture
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

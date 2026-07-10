@@ -8,6 +8,8 @@ import { getSettings } from "@/lib/settings";
 import { pollInbox } from "@/services/inboxSync";
 import { findRelatedLocal } from "@/services/weave";
 import { checkGaiaProactiveTopics } from "@/services/gaiaProactive";
+import { startUiaCaptureListener } from "@/services/uiaCapture";
+import { invokeTauri } from "@/lib/tauri";
 import { Sidebar } from "@/components/Sidebar";
 import { ObjectList } from "@/components/ObjectList";
 import { ObjectDetail } from "@/components/ObjectDetail";
@@ -111,6 +113,17 @@ export default function App() {
     const id = setInterval(poll, 30000);
     poll();
     return () => clearInterval(id);
+  }, []);
+
+  // Native Windows UI Automation activity capture (desktop app only — a
+  // no-op in a plain browser preview, same fail-silent pattern as every
+  // other Tauri-dependent feature). Off by default; only starts if the user
+  // has actually opted in via Settings.
+  useEffect(() => {
+    const { uiaCaptureEnabled, uiaCaptureText } = getSettings();
+    if (!uiaCaptureEnabled) return;
+    invokeTauri("start_uia_capture", { includeText: !!uiaCaptureText });
+    startUiaCaptureListener();
   }, []);
 
   const selectedObject = allObjects.find((o) => o.id === selectedId) || null;

@@ -30,6 +30,14 @@ const DEFAULTS = {
   // Chronicle's own backend (GET /api/settings/gaia-hermes-config) at call
   // time, never cached here, so a stale value can't silently persist.
   gaiaHermesEnabled: false,
+  // Native Windows UI Automation activity capture (desktop app only, no-op
+  // in a plain browser). Off by default — opt-in, same as every other
+  // capture/routing feature here. uiaCaptureText is a separate flag so
+  // app/window tracking can be on without also reading visible text of UI
+  // elements, mirroring PureMemory's own base-capture-vs-clipboard-content
+  // split for the same defense-in-depth reason.
+  uiaCaptureEnabled: false,
+  uiaCaptureText: false,
   models: {
     tagging: DEFAULT_MODEL,
     weave: DEFAULT_MODEL,

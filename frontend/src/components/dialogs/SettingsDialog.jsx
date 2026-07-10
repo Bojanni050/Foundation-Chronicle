@@ -7,18 +7,8 @@ import { fetchOpenRouterModels, getCachedOpenRouterModels, formatPrice } from "@
 import { toast } from "sonner";
 import { objectRepository } from "@/repositories";
 import { getDB, OBJECT_STORE } from "@/lib/db";
-
-// Best-effort bridge to the Tauri sidecar config — a no-op outside the
-// desktop app (e.g. hosted preview in a plain browser), same fail-silent
-// convention as the rest of Chronicle's optional local features.
-async function invokeTauri(cmd, args) {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke(cmd, args);
-  } catch {
-    return null;
-  }
-}
+import { invokeTauri } from "@/lib/tauri";
+import { startUiaCaptureListener, stopUiaCaptureListener } from "@/services/uiaCapture";
 
 function Field({ label, children, hint }) {
   return (
@@ -45,7 +35,6 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [seedBusy, setSeedBusy] = useState(false);
   const [ggufPath, setGgufPath] = useState("");
   const [ggufSaveState, setGgufSaveState] = useState(null); // null | saving | saved
-  const [activityAgentEnabled, setActivityAgentEnabledState] = useState(true);
   const [hermesSkills, setHermesSkills] = useState([]);
   const [hermesSkillsLoading, setHermesSkillsLoading] = useState(false);
   const [hermesSkillsSaving, setHermesSkillsSaving] = useState("");
@@ -134,10 +123,6 @@ export function SettingsDialog({ open, onOpenChange }) {
       setModelsFetchedAt(cached.fetchedAt);
       loadEmbeddingModel();
       invokeTauri("get_local_model_path").then((p) => setGgufPath(p || ""));
-      fetch(`${getSettings().apiUrl}/api/settings/activity-agent`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => d && setActivityAgentEnabledState(d.enabled))
-        .catch(() => {});
       loadHermesSkills();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -181,16 +166,28 @@ export function SettingsDialog({ open, onOpenChange }) {
     setHermesSkillsSaving("");
   };
 
-  const toggleActivityAgent = async (enabled) => {
-    setActivityAgentEnabledState(enabled);
-    try {
-      await fetch(`${getSettings().apiUrl}/api/settings/activity-agent`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-    } catch {
-      // local server unreachable — setting stays as shown, will retry to read next open
+  // Native activity capture, embedded directly in the Tauri app — see
+  // src-tauri/src/uia_capture.rs. No server-side toggle/route: unlike the
+  // old PureMemory collector-agent, this never needs the Node server to
+  // spawn or manage anything, so the on/off state lives purely in these
+  // frontend settings and the Tauri commands below.
+  const toggleUiaCapture = async (enabled) => {
+    update({ uiaCaptureEnabled: enabled });
+    if (enabled) {
+      await invokeTauri("start_uia_capture", { includeText: !!s.uiaCaptureText });
+      await startUiaCaptureListener();
+    } else {
+      await invokeTauri("stop_uia_capture");
+      stopUiaCaptureListener();
+    }
+  };
+
+  const toggleUiaCaptureText = (enabled) => {
+    update({ uiaCaptureText: enabled });
+    if (s.uiaCaptureEnabled) {
+      // start_uia_capture is idempotent while already running — it just
+      // updates the include-text flag on the live capture thread in place.
+      invokeTauri("start_uia_capture", { includeText: enabled });
     }
   };
 
@@ -344,24 +341,42 @@ export function SettingsDialog({ open, onOpenChange }) {
 
           <div className="border-t border-border" />
 
-          {/* Native activity capture (Rust UI-Automation agent) */}
+          {/* Native UI Automation activity capture (desktop app only) */}
           <section className="space-y-4">
-            <h3 className="font-serif text-base text-ink">Activity capture</h3>
+            <h3 className="font-serif text-base text-ink">Activity capture (Windows UI Automation)</h3>
             <p className="text-xs text-muted-foreground">
-              Auto-starts Chronicle's own activity-agent alongside the server: it watches the Windows foreground
-              window via UI Automation and turns each focus session's visible text into an activity object.
-              Window title + visible UI text only — never clipboard content.
+              Reads the active app/window and, optionally, visible text of UI elements directly via Windows' own
+              accessibility tree — no external process, no clipboard access. Runs inside Chronicle's desktop app;
+              has no effect in a browser preview.
             </p>
             <label className="flex items-center gap-2 text-sm text-ink">
               <input
                 type="checkbox"
-                data-testid="activity-agent-toggle"
-                checked={activityAgentEnabled}
-                onChange={(e) => toggleActivityAgent(e.target.checked)}
+                data-testid="uia-capture-toggle"
+                checked={!!s.uiaCaptureEnabled}
+                onChange={(e) => toggleUiaCapture(e.target.checked)}
                 className="h-4 w-4 rounded border-border"
               />
-              Start the activity-agent with Chronicle
+              Track active app/window
             </label>
+
+            <div className="pt-1 space-y-1.5">
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  data-testid="uia-capture-text-toggle"
+                  checked={!!s.uiaCaptureText}
+                  onChange={(e) => toggleUiaCaptureText(e.target.checked)}
+                  className="h-4 w-4 rounded border-border"
+                />
+                Also capture visible text of UI elements
+              </label>
+              <p className="text-[11px] text-muted-foreground/70">
+                Off by default: reads text from the on-screen text/edit/document elements of the focused window
+                (e.g. an address bar, a text editor's content). Anything shaped like a password (a token with
+                mixed case, digits, and symbols) is redacted before it ever leaves the capture module.
+              </p>
+            </div>
           </section>
 
           <div className="border-t border-border" />
