@@ -130,7 +130,12 @@ export default function App() {
   }, []);
 
   const onDelete = useCallback(async (id) => {
-    await objectRepository.delete(id);
+    try {
+      await objectRepository.delete(id);
+    } catch (err) {
+      toast.error(err.message || "Could not delete object");
+      return;
+    }
     if (selectedId === id) setSelectedId(null);
     await refresh();
     toast("Object deleted");

@@ -422,7 +422,7 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
       if (current) {
         objectRepository
           .update(chatObjectIdRef.current, {
-            lastProcessedForPersonaAt: new Date().toISOString(),
+            processedAt: new Date().toISOString(),
             updatedAt: current.updatedAt,
           })
           .catch(() => {});

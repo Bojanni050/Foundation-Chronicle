@@ -19,6 +19,15 @@ function fuzzyMatch(query, text) {
   return qi === query.length;
 }
 
+// Fields a locked object refuses to change — the user's actual information.
+// Bookkeeping fields (processedAt, updatedAt, embedding-related, etc.) are
+// deliberately NOT in this list: pipelines like persona consolidation still
+// need to mark a locked object as "seen" without that counting as altering it.
+const LOCKED_PROTECTED_FIELDS = [
+  "title", "content", "tags", "type", "source", "sourceProvider", "sourceUrl",
+  "occurredAt", "validFrom", "validTo", "temporalText", "links",
+];
+
 // Type is OPTIONAL: an item may be saved without a type (stored as null).
 // But IF a type is provided, it must be a known built-in or custom type.
 function validateType(type) {
@@ -63,7 +72,12 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       validFrom: data.validFrom || null,
       validTo: data.validTo || null,
       temporalText: data.temporalText || null,
-      lastProcessedForPersonaAt: data.lastProcessedForPersonaAt || null,
+      // Generic "when was this last processed" watermark — not scoped to any
+      // one pipeline. Compared against updatedAt by any process that wants
+      // to skip re-processing unchanged content (currently: persona
+      // detection's full scan and Gaia's live consolidation).
+      processedAt: data.processedAt || null,
+      locked: data.locked === true,
       createdAt: data.createdAt || now,
       updatedAt: now,
     };
@@ -96,6 +110,9 @@ export class IndexedDBObjectRepository extends ObjectRepository {
     const db = await getDB();
     const existing = await db.get(OBJECT_STORE, id);
     if (!existing) return null;
+    if (existing.locked && LOCKED_PROTECTED_FIELDS.some((f) => f in patch)) {
+      throw new Error("This entry is locked. Unlock it before making changes.");
+    }
     const cleanPatch = { ...patch };
     if ("type" in cleanPatch) cleanPatch.type = validateType(cleanPatch.type);
     const updated = {
@@ -111,6 +128,10 @@ export class IndexedDBObjectRepository extends ObjectRepository {
 
   async delete(id) {
     const db = await getDB();
+    const existing = await db.get(OBJECT_STORE, id);
+    if (existing?.locked) {
+      throw new Error("This entry is locked. Unlock it before deleting it.");
+    }
     await db.delete(OBJECT_STORE, id);
     return true;
   }
