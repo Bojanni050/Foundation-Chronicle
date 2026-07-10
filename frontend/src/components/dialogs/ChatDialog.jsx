@@ -38,6 +38,17 @@ function parseSuggestions(content) {
   return { text: content, suggestions: [] };
 }
 
+function GaiaAvatar({ size = "md" }) {
+  const sz = size === "xs" ? "h-4 w-4" : size === "sm" ? "h-8 w-8" : "h-14 w-14";
+  return (
+    <img
+      src="/gaia-avatar.jpg"
+      alt="Gaia"
+      className={`${sz} rounded-md object-cover object-top shrink-0 shadow-sm`}
+    />
+  );
+}
+
 // ─── Individual chat pane (reused for Gaia main + each specialist tab) ────────
 function ChatPane({ tabId, isGaia, specialistName, onSendMessage, messages, sending, onClear, onQuickAction, inputRef }) {
   const scrollRef = useRef(null);
@@ -72,9 +83,15 @@ function ChatPane({ tabId, isGaia, specialistName, onSendMessage, messages, send
       <div className="flex-1 overflow-y-auto py-4 space-y-4 no-scrollbar bg-background/25 rounded-xl border border-border/30 px-3">
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">
-            <div className="rounded-full bg-primary/5 p-4 text-primary animate-pulse">
-              {isGaia ? <Sparkles className="w-8 h-8" /> : <Bot className="w-8 h-8" />}
-            </div>
+            {isGaia ? (
+              <div className="rounded-full bg-primary/5 p-1 text-primary">
+                <GaiaAvatar size="md" />
+              </div>
+            ) : (
+              <div className="rounded-full bg-primary/5 p-4 text-primary animate-pulse">
+                <Bot className="w-8 h-8" />
+              </div>
+            )}
             <div className="space-y-1.5 max-w-sm">
               <h4 className="font-serif text-base font-semibold text-ink">
                 {isGaia ? "Meet Gaia" : `${specialistName} Specialist`}
@@ -106,14 +123,14 @@ function ChatPane({ tabId, isGaia, specialistName, onSendMessage, messages, send
                       className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-lg text-xs font-semibold ${
                         msg.role === "user"
                           ? "bg-primary/20 text-primary"
-                          : "bg-accent text-accent-foreground"
+                          : ""
                       }`}
                     >
                       {msg.role === "user"
                         ? <User className="w-4 h-4" />
                         : isGaia
-                        ? <Sparkles className="w-4 h-4" />
-                        : <Bot className="w-4 h-4" />}
+                        ? <GaiaAvatar size="sm" />
+                        : <div className="h-8 w-8 flex items-center justify-center rounded-lg bg-accent text-accent-foreground"><Bot className="w-4 h-4" /></div>}
                     </div>
 
                     {/* Bubble */}
@@ -149,7 +166,9 @@ function ChatPane({ tabId, isGaia, specialistName, onSendMessage, messages, send
             {sending && (
               <div className="flex gap-3 max-w-[85%] mr-auto items-center">
                 <div className="h-8 w-8 shrink-0 flex items-center justify-center rounded-lg bg-accent text-accent-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                  {isGaia
+                    ? <GaiaAvatar size="sm" />
+                    : <Loader2 className="w-4 h-4 animate-spin text-primary" />}
                 </div>
                 <div className="bg-card border border-border/80 rounded-xl px-4 py-2.5 text-xs text-muted-foreground italic font-sans flex items-center gap-1.5">
                   <span>{isGaia ? "Gaia is reasoning..." : `${specialistName} is thinking...`}</span>
@@ -411,8 +430,8 @@ export function ChatDialog({ open, onOpenChange }) {
           <DialogHeader className="border-b border-border/60 pb-3 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <MessageSquare className="w-5 h-5" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl overflow-hidden bg-primary/10">
+                  <GaiaAvatar size="sm" />
                 </div>
                 <div>
                   <DialogTitle className="font-serif text-lg text-ink">Chat with Gaia</DialogTitle>
@@ -461,7 +480,7 @@ export function ChatDialog({ open, onOpenChange }) {
                     onClick={() => setActiveTab(tab.id)}
                   >
                     {tab.isGaia ? (
-                      <Sparkles className="w-3 h-3 text-primary" />
+                      <GaiaAvatar size="xs" />
                     ) : (
                       <Bot className="w-3 h-3 text-primary/70" />
                     )}
