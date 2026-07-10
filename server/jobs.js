@@ -1,6 +1,7 @@
 const { pool } = require("./db");
 const { embed } = require("./embedding");
 const { getOrCreateInstelling } = require("./personaHelper");
+const { startPureMemoryIngest } = require("./purememoryIngest");
 
 async function runAutoHealEmbeddings() {
   console.log("[Auto-Heal] Running background auto-heal loop for missing embeddings...");
@@ -79,10 +80,15 @@ async function consolidateKenmerken() {
             isFeit = true;
           }
           
-          // Mark merged trait as rejected
+          // Mark merged trait as rejected — points at the survivor
+          // (vervangen_door) so the consolidation trail stays inspectable,
+          // per the manifest's requirement that a consolidation-rejected
+          // record permanently references what it was merged into. verwerp_bron
+          // = 'consolidatie' distinguishes this from a mens-rejectie: this
+          // record must never resurrect on its own (it lives on in the survivor).
           await pool.query(
-            "UPDATE persona_kenmerk SET status = 'rejected' WHERE id = $1",
-            [match.id]
+            "UPDATE persona_kenmerk SET status = 'rejected', vervangen_door = $1, verwerp_bron = 'consolidatie' WHERE id = $2",
+            [current.id, match.id]
           );
         }
         
@@ -120,6 +126,13 @@ function startBackgroundJobs() {
 
   setTimeout(runAutoHealEmbeddings, 10000);  // 10 seconds after startup
   setTimeout(consolidateKenmerken, 12000);   // 12 seconds after startup
+
+  // Screenpipe is gated behind its own subscription now and unusable — not
+  // started. PureMemory is the active activity-capture source instead.
+  // Best-effort — if the PureMemory agent isn't running, this just fails
+  // silently on each poll and retries, same as the rest of Chronicle's
+  // local-server-optional features.
+  startPureMemoryIngest();
 }
 
 module.exports = {

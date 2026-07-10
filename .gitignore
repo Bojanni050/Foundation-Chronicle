@@ -86,3 +86,6 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Gaia's self-contained Hermes backend — runtime state, .env, sessions, skills
+server/gaia-backend/.hermes-home/

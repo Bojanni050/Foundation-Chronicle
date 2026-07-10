@@ -8,6 +8,18 @@ import { toast } from "sonner";
 import { objectRepository } from "@/repositories";
 import { getDB, OBJECT_STORE } from "@/lib/db";
 
+// Best-effort bridge to the Tauri sidecar config — a no-op outside the
+// desktop app (e.g. hosted preview in a plain browser), same fail-silent
+// convention as the rest of Chronicle's optional local features.
+async function invokeTauri(cmd, args) {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke(cmd, args);
+  } catch {
+    return null;
+  }
+}
+
 function Field({ label, children, hint }) {
   return (
     <div className="space-y-1.5">
@@ -23,8 +35,6 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [showKey, setShowKey] = useState(false);
   const [testState, setTestState] = useState(null); // null | testing | ok | fail
   const [testMsg, setTestMsg] = useState("");
-  const [hermesTestState, setHermesTestState] = useState(null); // null | testing | ok | fail
-  const [hermesTestMsg, setHermesTestMsg] = useState("");
   const [copied, setCopied] = useState(false);
   const [models, setModels] = useState([]);
   const [modelsFetchedAt, setModelsFetchedAt] = useState(null);
@@ -33,6 +43,10 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [embeddingModel, setEmbeddingModelState] = useState(null); // { model, options } | null
   const [embeddingBusy, setEmbeddingBusy] = useState(false);
   const [seedBusy, setSeedBusy] = useState(false);
+  const [ggufPath, setGgufPath] = useState("");
+  const [ggufSaveState, setGgufSaveState] = useState(null); // null | saving | saved
+  const [pureMemoryEnabled, setPureMemoryEnabledState] = useState(true);
+  const [clipboardCaptureEnabled, setClipboardCaptureEnabledState] = useState(false);
 
   const handleSeed = async () => {
     setSeedBusy(true);
@@ -116,9 +130,53 @@ export function SettingsDialog({ open, onOpenChange }) {
       setModels(cached.models);
       setModelsFetchedAt(cached.fetchedAt);
       loadEmbeddingModel();
+      invokeTauri("get_local_model_path").then((p) => setGgufPath(p || ""));
+      fetch(`${getSettings().apiUrl}/api/settings/purememory`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => d && setPureMemoryEnabledState(d.enabled))
+        .catch(() => {});
+      fetch(`${getSettings().apiUrl}/api/settings/purememory-privacy`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => d && setClipboardCaptureEnabledState(d.clipboardCaptureEnabled))
+        .catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const togglePureMemory = async (enabled) => {
+    setPureMemoryEnabledState(enabled);
+    try {
+      await fetch(`${getSettings().apiUrl}/api/settings/purememory`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+    } catch {
+      // local server unreachable — setting stays as shown, will retry to read next open
+    }
+  };
+
+  const toggleClipboardCapture = async (enabled) => {
+    setClipboardCaptureEnabledState(enabled);
+    try {
+      const res = await fetch(`${getSettings().apiUrl}/api/settings/purememory-privacy`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      // PureMemory agent not reachable — revert the shown state
+      setClipboardCaptureEnabledState(!enabled);
+    }
+  };
+
+  const saveGgufPath = async () => {
+    setGgufSaveState("saving");
+    await invokeTauri("set_local_model_path", { path: ggufPath });
+    setGgufSaveState("saved");
+    setTimeout(() => setGgufSaveState(null), 1500);
+  };
 
   const loadEmbeddingModel = async () => {
     try {
@@ -165,19 +223,6 @@ export function SettingsDialog({ open, onOpenChange }) {
     }
   };
 
-  const testHermes = async () => {
-    setHermesTestState("testing");
-    setHermesTestMsg("");
-    try {
-      const r = await AIService.testHermes(s.chatEndpoint, s.chatKey, s.models.chat);
-      setHermesTestState("ok");
-      setHermesTestMsg(`Connected · replied "${r.sample}"`);
-    } catch (e) {
-      setHermesTestState("fail");
-      setHermesTestMsg("Connection failed — check URL & key.");
-    }
-  };
-
   const fetchToken = async () => {
     try {
       const res = await fetch(`${s.apiUrl}/api/settings/token`);
@@ -207,7 +252,7 @@ export function SettingsDialog({ open, onOpenChange }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto no-scrollbar" data-testid="settings-dialog">
+      <DialogContent className="max-w-[75vw] max-h-[85vh] overflow-y-auto no-scrollbar" data-testid="settings-dialog">
         <DialogHeader>
           <DialogTitle className="font-serif text-xl">Settings</DialogTitle>
         </DialogHeader>
@@ -276,47 +321,114 @@ export function SettingsDialog({ open, onOpenChange }) {
 
           <div className="border-t border-border" />
 
-          {/* AI Chat - Hermes Agent */}
+          {/* PureMemory activity capture */}
           <section className="space-y-4">
-            <h3 className="font-serif text-base text-ink">AI Chat · Hermes Agent</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Hermes Agent API URL" hint="OpenAI-compatible gateway endpoint for Nous Hermes Agent.">
+            <h3 className="font-serif text-base text-ink">Activity capture (PureMemory)</h3>
+            <p className="text-xs text-muted-foreground">
+              Auto-starts the local PureMemory collector-agent alongside Chronicle's server, feeding raw
+              clipboard/app-focus/file activity into your activity objects. Only the capture layer is used —
+              its own AI summarization is never touched.
+            </p>
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                data-testid="puremind-toggle"
+                checked={pureMemoryEnabled}
+                onChange={(e) => togglePureMemory(e.target.checked)}
+                className="h-4 w-4 rounded border-border"
+              />
+              Start the collector-agent with Chronicle
+            </label>
+
+            <div className="pt-1 space-y-1.5">
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  data-testid="clipboard-capture-toggle"
+                  checked={clipboardCaptureEnabled}
+                  onChange={(e) => toggleClipboardCapture(e.target.checked)}
+                  className="h-4 w-4 rounded border-border"
+                />
+                Store clipboard text content
+              </label>
+              <p className="text-[11px] text-muted-foreground/70">
+                Off by default: only that a copy happened is recorded (app, timestamp, character count) — never
+                the text itself. Regardless of this setting, anything shaped like a password (a single token with
+                mixed case/digits/symbols) is never stored.
+              </p>
+            </div>
+          </section>
+
+          <div className="border-t border-border" />
+
+          {/* Optional local model */}
+          <section className="space-y-4">
+            <h3 className="font-serif text-base text-ink">Local model (optional)</h3>
+            <p className="text-xs text-muted-foreground">
+              Route every AI function through a local, GPU-accelerated model server (e.g. llama-server) instead of
+              OpenRouter. Off by default — no key needed when enabled, nothing changes for anyone who leaves this off.
+            </p>
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                data-testid="use-local-model-toggle"
+                checked={!!s.useLocalModel}
+                onChange={(e) => update({ useLocalModel: e.target.checked })}
+                className="h-4 w-4 rounded border-border"
+              />
+              Use local model instead of OpenRouter
+            </label>
+            <Field label="Local model URL" hint="OpenAI-compatible endpoint, e.g. your llama-server sidecar.">
+              <input
+                type="text"
+                value={s.localModelUrl || ""}
+                onChange={(e) => update({ localModelUrl: e.target.value })}
+                placeholder="http://127.0.0.1:8080/v1"
+                className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-xs text-ink focus:outline-none"
+              />
+            </Field>
+            <Field label="GGUF model path" hint="Passed to the llama-server sidecar on next app start. Desktop app only.">
+              <div className="flex items-center gap-2">
                 <input
                   type="text"
-                  value={s.chatEndpoint || ""}
-                  onChange={(e) => update({ chatEndpoint: e.target.value })}
-                  placeholder="https://hermes-agent.nousresearch.com/v1"
-                  className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-xs text-ink focus:outline-none"
+                  value={ggufPath}
+                  onChange={(e) => setGgufPath(e.target.value)}
+                  placeholder="C:\models\your-model.gguf"
+                  className="flex-1 rounded-lg border border-border bg-card/50 px-3 py-2 text-xs text-ink focus:outline-none"
                 />
-              </Field>
-              <Field label="Hermes Agent API Key" hint="Optional secret key. Uses OpenRouter key if left blank.">
-                <input
-                  type="password"
-                  value={s.chatKey || ""}
-                  onChange={(e) => update({ chatKey: e.target.value })}
-                  placeholder="Bearer token (optional)"
-                  className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-xs text-ink focus:outline-none"
-                />
-              </Field>
-            </div>
+                <button
+                  onClick={saveGgufPath}
+                  disabled={ggufSaveState === "saving"}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-xs font-medium text-background hover:bg-ink/90 disabled:opacity-40 transition-colors"
+                >
+                  {ggufSaveState === "saving" && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {ggufSaveState === "saved" && <Check className="w-3.5 h-3.5" />}
+                  Save
+                </button>
+              </div>
+            </Field>
+          </section>
 
-            <div className="flex items-center gap-3">
-              <button
-                onClick={testHermes}
-                disabled={hermesTestState === "testing"}
-                className="inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-2 text-sm font-medium text-background hover:bg-ink/90 disabled:opacity-40 transition-colors"
-              >
-                {hermesTestState === "testing" && <Loader2 className="w-4 h-4 animate-spin" />}
-                {hermesTestState === "ok" && <Check className="w-4 h-4" />}
-                {hermesTestState === "fail" && <X className="w-4 h-4" />}
-                Test Hermes Connection
-              </button>
-              {hermesTestMsg && (
-                <span className={`text-xs ${hermesTestState === "ok" ? "text-primary" : "text-destructive"}`}>
-                  {hermesTestMsg}
-                </span>
-              )}
-            </div>
+          <div className="border-t border-border" />
+
+          {/* Gaia's self-contained Hermes backend */}
+          <section className="space-y-4">
+            <h3 className="font-serif text-base text-ink">Gaia's Hermes-backend</h3>
+            <p className="text-xs text-muted-foreground">
+              Routes Gaia's own chat turn through her self-contained Hermes instance (terminal/file tool access)
+              instead of OpenRouter directly. Off by default. If the backend is unreachable when this is on, chat
+              fails with a clear error rather than silently falling back — no cached URL/key is ever stored here.
+            </p>
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                data-testid="gaia-hermes-toggle"
+                checked={!!s.gaiaHermesEnabled}
+                onChange={(e) => update({ gaiaHermesEnabled: e.target.checked })}
+                className="h-4 w-4 rounded border-border"
+              />
+              Route Gaia's chat through her Hermes-backend
+            </label>
           </section>
 
           <div className="border-t border-border" />
@@ -327,6 +439,19 @@ export function SettingsDialog({ open, onOpenChange }) {
             <p className="text-xs text-muted-foreground">
               Each AI feature can use its own model. Fetch OpenRouter's catalog above to see live pricing and capabilities here.
             </p>
+            <Field
+              label="Live Gaia consolidation"
+              hint="While a Gaia conversation stays open, scan it for persona kenmerken every N exchanges (0 disables this — it still gets scanned normally once saved/closed)."
+            >
+              <input
+                type="number"
+                min="0"
+                data-testid="gaia-consolidate-every-n"
+                value={s.gaiaConsolidateEveryNTurns}
+                onChange={(e) => update({ gaiaConsolidateEveryNTurns: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                className="w-24 rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
+              />
+            </Field>
             {AI_FUNCTIONS.map((fn) => {
               const current = s.models[fn.key];
               const inList = models.some((m) => m.id === current);

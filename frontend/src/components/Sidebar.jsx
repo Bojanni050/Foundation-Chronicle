@@ -12,8 +12,8 @@ import {
   Waypoints,
   Cpu,
   Lock,
-  Monitor,
   MessageSquare,
+  Bot,
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
 import { useTypes } from "@/hooks/useTypes";
@@ -54,12 +54,12 @@ export function Sidebar({
   onSelectView,
   onNew,
   onImport,
-  onScreenpipe,
   onAddType,
   onSearch,
   onPulse,
   onChat,
   onPersona,
+  onSpecialist,
   onGraph,
   onEngine,
   onLock,
@@ -136,10 +136,6 @@ export function Sidebar({
                 <Upload className="w-4 h-4 mr-2 text-primary" strokeWidth={1.75} />
                 Import chat…
               </DropdownMenuItem>
-              <DropdownMenuItem data-testid="new-menu-screenpipe" onClick={onScreenpipe}>
-                <Monitor className="w-4 h-4 mr-2 text-primary" strokeWidth={1.75} />
-                Import Screenpipe…
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -206,8 +202,9 @@ export function Sidebar({
       {/* footer */}
       <div className="mt-auto border-t border-border px-3 py-2">
         <NavRow icon={Activity} label="AI Pulse" active={false} onClick={onPulse} testId="nav-pulse" />
-        <NavRow icon={MessageSquare} label="AI Chat (Hermes)" active={false} onClick={onChat} testId="nav-chat" />
+        <NavRow icon={MessageSquare} label="AI Chat (Gaia)" active={false} onClick={onChat} testId="nav-chat" />
         <NavRow icon={Fingerprint} label="Persona" active={false} onClick={onPersona} testId="nav-persona" />
+        <NavRow icon={Bot} label="AI Specialists" active={false} onClick={onSpecialist} testId="nav-specialist" />
         <NavRow icon={Waypoints} label="Knowledge graph" active={false} onClick={onGraph} testId="nav-graph" />
         <NavRow icon={Cpu} label="Chronicle Engine" active={false} onClick={onEngine} testId="nav-engine" />
         <NavRow icon={Lock} label="Lock workspace" active={false} onClick={onLock} testId="nav-lock" />
