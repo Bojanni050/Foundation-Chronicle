@@ -34,12 +34,17 @@ export async function pollInbox() {
   let created = 0;
   for (const it of items) {
     try {
-      // Skip if an object with the same content hash already exists
+      // Skip if an object with the same content hash already exists. Not
+      // counted in `created` — pushToInbox() only dedups against what's
+      // still queued (server/inboxStore.js), not against already-claimed
+      // history, so re-sending an already-imported chat (e.g. clicking the
+      // extension's Send button again) reaches here every time. Counting it
+      // as "created" produced a "1 chat pulled from extension" toast on
+      // every such resend even though nothing new was actually added.
       const hash = it.contentHash || (it.content ? contentHash(it.content) : "");
       if (hash) {
         const existing = await objectRepository.findByContentHash(hash);
         if (existing) {
-          created++;
           continue;
         }
       }

@@ -36,6 +36,7 @@ export default function App() {
   const [workspaceName, setWorkspaceName] = useState(getSettings().workspaceName);
   const [syncing, setSyncing] = useState(false);
   const [weaveOpen, setWeaveOpen] = useState(false);
+  const [pulseBusy, setPulseBusy] = useState(false);
 
   const [dlg, setDlg] = useState({ search: false, import: false, chat: false, settings: false, pulse: false, persona: false, specialist: false, graph: false, addType: false, engine: false });
   const [resumeChat, setResumeChat] = useState(null); // object to resume in ChatDialog
@@ -217,6 +218,7 @@ export default function App() {
         onAddType={() => setDlg((d) => ({ ...d, addType: true }))}
         onSearch={() => setDlg((d) => ({ ...d, search: true }))}
         onPulse={() => setDlg((d) => ({ ...d, pulse: true }))}
+        pulseBusy={pulseBusy}
         onChat={() => setDlg((d) => ({ ...d, chat: true }))}
         onPersona={() => setDlg((d) => ({ ...d, persona: true }))}
         onSpecialist={() => setDlg((d) => ({ ...d, specialist: true }))}
@@ -290,7 +292,7 @@ export default function App() {
         onImported={async (n) => { await refresh(); toast.success(`Imported ${n} chat${n === 1 ? "" : "s"}`); }}
       />
       <SettingsDialog open={dlg.settings} onOpenChange={(v) => setDlg((d) => ({ ...d, settings: v }))} />
-      <PulseDialog open={dlg.pulse} onOpenChange={(v) => setDlg((d) => ({ ...d, pulse: v }))} />
+      <PulseDialog open={dlg.pulse} onOpenChange={(v) => setDlg((d) => ({ ...d, pulse: v }))} onBusyChange={setPulseBusy} />
       <ChatDialog
         open={dlg.chat}
         onOpenChange={(v) => {

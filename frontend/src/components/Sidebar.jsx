@@ -25,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-function NavRow({ icon: Icon, label, count, active, onClick, testId }) {
+function NavRow({ icon: Icon, label, count, active, onClick, testId, iconClassName = "" }) {
   return (
     <button
       onClick={onClick}
@@ -37,7 +37,7 @@ function NavRow({ icon: Icon, label, count, active, onClick, testId }) {
       }`}
     >
       <Icon
-        className={`w-[18px] h-[18px] ${active ? "text-primary" : "text-muted-foreground group-hover:text-primary/80"}`}
+        className={`w-[18px] h-[18px] ${active ? "text-primary" : "text-muted-foreground group-hover:text-primary/80"} ${iconClassName}`}
         strokeWidth={1.75}
       />
       <span className="flex-1 text-left truncate">{label}</span>
@@ -57,6 +57,7 @@ export function Sidebar({
   onAddType,
   onSearch,
   onPulse,
+  pulseBusy,
   onChat,
   onPersona,
   onSpecialist,
@@ -201,7 +202,14 @@ export function Sidebar({
 
       {/* footer */}
       <div className="mt-auto border-t border-border px-3 py-2">
-        <NavRow icon={Activity} label="AI Pulse" active={false} onClick={onPulse} testId="nav-pulse" />
+        <NavRow
+          icon={Activity}
+          label="AI Pulse"
+          active={false}
+          onClick={onPulse}
+          testId="nav-pulse"
+          iconClassName={pulseBusy ? "animate-pulse" : ""}
+        />
         <NavRow icon={MessageSquare} label="AI Chat (Gaia)" active={false} onClick={onChat} testId="nav-chat" />
         <NavRow icon={Fingerprint} label="Persona" active={false} onClick={onPersona} testId="nav-persona" />
         <NavRow icon={Bot} label="AI Specialists" active={false} onClick={onSpecialist} testId="nav-specialist" />

@@ -12,12 +12,19 @@ import {
   getPersonaState,
 } from "@/services/personaSync";
 
-export function PulseDialog({ open, onOpenChange }) {
+export function PulseDialog({ open, onOpenChange, onBusyChange }) {
   const [items, setItems] = useState(null);
   const [busy, setBusy] = useState(false);
   const [aiUsed, setAiUsed] = useState(false);
   const [note, setNote] = useState("");
   const [cachedAt, setCachedAt] = useState(null);
+
+  // Reported up to App.js so the sidebar's "AI Pulse" icon can animate while
+  // a pulse is generating, even though the dialog itself may be closed by
+  // then (the sidebar row should reflect it regardless of dialog visibility).
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
   useEffect(() => {
     if (!open) return;
