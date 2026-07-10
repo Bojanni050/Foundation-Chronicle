@@ -548,24 +548,68 @@ export function ChatDialog({ open, onOpenChange, resumeObject, proactiveTopic })
   const activeTabData = tabs.find((t) => t.id === activeTab) || tabs[0];
   const currentMessages = activeTabData?.messages || [];
 
+  // ── Drag to move ─────────────────────────────────────────────────────────
+  // pos is null until the user first drags the widget — while null it stays
+  // pinned bottom-right via CSS; once dragged, its top/left is explicit and
+  // it stops following the corner. Position is intentionally not persisted
+  // (resets to the default corner on reload), same as every other panel's
+  // open/closed state in this app (no existing precedent for persisting UI
+  // chrome position either).
+  const panelRef = useRef(null);
+  const [pos, setPos] = useState(null);
+
+  const handleDragStart = (e) => {
+    if (e.target.closest("button")) return; // let header buttons work normally
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startLeft = rect.left;
+    const startTop = rect.top;
+
+    const onMove = (ev) => {
+      const width = panelRef.current?.offsetWidth || 420;
+      let left = startLeft + (ev.clientX - startX);
+      let top = startTop + (ev.clientY - startY);
+      // Clamp so the widget can't be dragged fully off-screen and lost.
+      left = Math.min(Math.max(left, 8), window.innerWidth - Math.min(width, 160));
+      top = Math.min(Math.max(top, 8), window.innerHeight - 48);
+      setPos({ x: left, y: top });
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   return (
     <>
-    {/* Floating, non-modal chat widget — fixed bottom-right, no overlay/focus
-        trap, so the rest of the app stays interactive while it's open. Not a
-        Dialog: Gaia should be able to pop this open on her own (see App.js's
-        proactive-topic polling) without blocking whatever else is on screen. */}
+    {/* Floating, non-modal, movable chat widget — no overlay/focus trap, so
+        the rest of the app stays interactive while it's open. Not a Dialog:
+        Gaia should be able to pop this open on her own (see App.js's
+        proactive-topic polling) without blocking whatever else is on screen.
+        Starts pinned bottom-right; dragging by the header frees it to sit
+        anywhere on screen (see handleDragStart/pos above). */}
     {open && (
       <div
+        ref={panelRef}
         data-testid="gaia-floating-chat"
-        className={`fixed bottom-6 right-6 z-50 flex h-[600px] max-h-[calc(100vh-3rem)] max-w-[calc(100vw-3rem)] overflow-hidden rounded-xl border border-border bg-background shadow-2xl transition-[width] duration-150 ${
+        style={pos ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" } : undefined}
+        className={`fixed ${pos ? "" : "bottom-6 right-6"} z-50 flex h-[600px] max-h-[calc(100vh-3rem)] max-w-[calc(100vw-3rem)] overflow-hidden rounded-xl border border-border bg-background shadow-2xl transition-[width] duration-150 ${
           showKennisPanel ? "w-[700px]" : "w-[420px]"
         }`}
       >
         {/* ── Left: chat column ─────────────────────────────────────────── */}
         <div className="flex-1 min-w-0 flex flex-col p-4 overflow-hidden">
 
-          {/* Header */}
-          <div className="border-b border-border/60 pb-3 shrink-0">
+          {/* Header — drag handle for the whole widget */}
+          <div
+            onMouseDown={handleDragStart}
+            className="border-b border-border/60 pb-3 shrink-0 cursor-move select-none"
+            title="Sleep om te verplaatsen"
+          >
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl overflow-hidden bg-primary/10">
