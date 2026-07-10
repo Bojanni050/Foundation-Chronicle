@@ -160,3 +160,28 @@ export async function chatWithGaia(messages) {
     gaiaEndpoint.customKey
   );
 }
+// Direct specialist conversation — used when the user opens a specialist tab
+// in ChatDialog and chats with it directly, bypassing Gaia's routing layer.
+// The specialist's own system prompt is used; the model falls back to the
+// settings specialist model if none is set on the specialist row itself.
+export async function chatWithSpecialist(specialistName, messages) {
+  const { models } = getSettings();
+  const { getConfirmedSpecialisten } = await import("../specialistSync");
+  const specialisten = await getConfirmedSpecialisten().catch(() => []);
+  const specialist = specialisten.find(
+    (s) => s.onderwerp.toLowerCase() === specialistName.toLowerCase()
+  );
+  if (!specialist) {
+    throw new Error(`Specialist "${specialistName}" not found or no longer confirmed.`);
+  }
+  const systemMessage = {
+    role: "system",
+    content: specialist.system_prompt || `You are a specialist in ${specialist.onderwerp}.`,
+  };
+  return await chat(
+    [systemMessage, ...messages],
+    { temperature: 0.4 },
+    specialist.model || models.specialist,
+    "specialist"
+  );
+}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,8 @@ import {
   Cpu,
   Loader2,
   BrainCircuit,
+  Bot,
+  X,
 } from "lucide-react";
 import { AIService } from "@/services/AIService";
 import { getSettings } from "@/lib/settings";
@@ -36,22 +38,167 @@ function parseSuggestions(content) {
   return { text: content, suggestions: [] };
 }
 
-export function ChatDialog({ open, onOpenChange }) {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
+// ─── Individual chat pane (reused for Gaia main + each specialist tab) ────────
+function ChatPane({ tabId, isGaia, specialistName, onSendMessage, messages, sending, onClear, onQuickAction, inputRef }) {
   const scrollRef = useRef(null);
+  const [input, setInput] = useState("");
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, sending]);
+
+  const handleSend = (e) => {
+    e.preventDefault();
+    if (!input.trim() || sending) return;
+    onSendMessage(tabId, input.trim());
+    setInput("");
+  };
+
+  const handleSuggestion = (suggestion) => {
+    onSendMessage(tabId, suggestion);
+  };
+
+  const placeholder = sending
+    ? "Waiting for response..."
+    : isGaia
+    ? "Type a message to Gaia..."
+    : `Ask ${specialistName}...`;
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+      {/* Message Stream */}
+      <div className="flex-1 overflow-y-auto py-4 space-y-4 no-scrollbar bg-background/25 rounded-xl border border-border/30 px-3">
+        {messages.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">
+            <div className="rounded-full bg-primary/5 p-4 text-primary animate-pulse">
+              {isGaia ? <Sparkles className="w-8 h-8" /> : <Bot className="w-8 h-8" />}
+            </div>
+            <div className="space-y-1.5 max-w-sm">
+              <h4 className="font-serif text-base font-semibold text-ink">
+                {isGaia ? "Meet Gaia" : `${specialistName} Specialist`}
+              </h4>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {isGaia
+                  ? "I can answer questions, analyze concepts, or assist you with coding tasks. I automatically factor in your confirmed memory traits to tailor answers for you."
+                  : `Direct conversation with your ${specialistName} specialist. Questions are answered using this specialist's dedicated context and system prompt.`}
+              </p>
+            </div>
+            {isGaia && <GaiaQuickActions onSelect={onQuickAction} />}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {messages.map((msg, idx) => {
+              const isAssistant = msg.role === "assistant";
+              const { text, suggestions } = isAssistant
+                ? parseSuggestions(msg.content)
+                : { text: msg.content, suggestions: [] };
+              return (
+                <div key={idx} className="space-y-2">
+                  <div
+                    className={`flex gap-3 max-w-[85%] ${
+                      msg.role === "user" ? "ml-auto flex-row-reverse" : "mr-auto"
+                    }`}
+                  >
+                    {/* Avatar */}
+                    <div
+                      className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-lg text-xs font-semibold ${
+                        msg.role === "user"
+                          ? "bg-primary/20 text-primary"
+                          : "bg-accent text-accent-foreground"
+                      }`}
+                    >
+                      {msg.role === "user"
+                        ? <User className="w-4 h-4" />
+                        : isGaia
+                        ? <Sparkles className="w-4 h-4" />
+                        : <Bot className="w-4 h-4" />}
+                    </div>
+
+                    {/* Bubble */}
+                    <div
+                      className={`rounded-xl px-4 py-2.5 text-xs leading-relaxed shadow-sm ${
+                        msg.role === "user"
+                          ? "bg-primary text-primary-foreground font-sans font-medium"
+                          : "bg-card border border-border/80 text-ink font-sans whitespace-pre-wrap"
+                      }`}
+                    >
+                      {text}
+                    </div>
+                  </div>
+
+                  {isAssistant && suggestions.length > 0 && idx === messages.length - 1 && (
+                    <div className="flex flex-wrap gap-2 pl-11 max-w-[85%]">
+                      {suggestions.map((suggestion, sIdx) => (
+                        <button
+                          key={sIdx}
+                          onClick={() => handleSuggestion(suggestion)}
+                          disabled={sending}
+                          className="text-[11px] font-sans text-primary hover:text-primary-foreground border border-primary/30 hover:border-primary hover:bg-primary/10 rounded-full px-3 py-1 bg-card transition-all active:scale-95 text-left disabled:opacity-50"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {sending && (
+              <div className="flex gap-3 max-w-[85%] mr-auto items-center">
+                <div className="h-8 w-8 shrink-0 flex items-center justify-center rounded-lg bg-accent text-accent-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                </div>
+                <div className="bg-card border border-border/80 rounded-xl px-4 py-2.5 text-xs text-muted-foreground italic font-sans flex items-center gap-1.5">
+                  <span>{isGaia ? "Gaia is reasoning..." : `${specialistName} is thinking...`}</span>
+                </div>
+              </div>
+            )}
+            <div ref={scrollRef} />
+          </div>
+        )}
+      </div>
+
+      {/* Input Bar */}
+      <form onSubmit={handleSend} className="pt-3 border-t border-border/60 shrink-0 flex items-center gap-2.5">
+        <input
+          ref={inputRef}
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          disabled={sending}
+          placeholder={placeholder}
+          className="flex-1 rounded-xl border border-border bg-background/50 px-4 py-2.5 text-xs text-ink focus:outline-none focus:border-primary/50 focus:bg-background transition-all disabled:opacity-50"
+        />
+        <button
+          type="submit"
+          disabled={sending || !input.trim()}
+          className="rounded-xl bg-ink p-2.5 text-background hover:bg-ink/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Send className="w-4 h-4" />
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ─── Main ChatDialog ──────────────────────────────────────────────────────────
+const GAIA_TAB = "__gaia__";
+
+export function ChatDialog({ open, onOpenChange }) {
+  // Tab state — each tab: { id, label, isGaia, specialistName?, messages[] }
+  const [tabs, setTabs] = useState([
+    { id: GAIA_TAB, label: "Gaia", isGaia: true, messages: [] },
+  ]);
+  const [activeTab, setActiveTab] = useState(GAIA_TAB);
+  const [sending, setSending] = useState(false);
+
   const inputRef = useRef(null);
-  // Stable per-session id — first message creates the "chat" object, every
-  // later message updates the same one (verbatim), so a whole Gaia
-  // conversation is one object, not one per exchange. Reset on clear/close
-  // so the next conversation starts a fresh object rather than appending
-  // to the previous one.
   const chatObjectIdRef = useRef(null);
-  // Every N exchanges (Settings: "Live Gaia consolidation"), the conversation
-  // so far gets scanned for persona kenmerken while still open — not just
-  // once at close. Results shown live in the right-hand panel.
   const exchangeCountRef = useRef(0);
+
   const [extractedKenmerken, setExtractedKenmerken] = useState([]);
   const [extractedKennis, setExtractedKennis] = useState([]);
   const [showKennisPanel, setShowKennisPanel] = useState(true);
@@ -60,16 +207,41 @@ export function ChatDialog({ open, onOpenChange }) {
   const settings = getSettings();
   const activeModel = settings.models?.chat || "nousresearch/hermes-3-llama-3-8b";
 
-  // Auto-scroll to bottom of chat when new messages appear
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages, sending]);
+  const getTabMessages = (tabId) =>
+    tabs.find((t) => t.id === tabId)?.messages || [];
 
-  // Verbatim save — every exchange, not just on close, so nothing is lost
-  // if the app closes mid-conversation. Cheap: IndexedDB only, no embedding
-  // here (that happens once, on dialog close — see handleOpenChange below).
+  const setTabMessages = (tabId, updater) => {
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.id === tabId
+          ? { ...t, messages: typeof updater === "function" ? updater(t.messages) : updater }
+          : t
+      )
+    );
+  };
+
+  // ── Open a specialist tab (idempotent — focus if already open) ─────────────
+  const openSpecialistTab = useCallback((specialistName) => {
+    const tabId = `specialist:${specialistName}`;
+    setTabs((prev) => {
+      if (prev.find((t) => t.id === tabId)) return prev;
+      return [
+        ...prev,
+        { id: tabId, label: specialistName, isGaia: false, specialistName, messages: [] },
+      ];
+    });
+    setActiveTab(tabId);
+  }, []);
+
+  // ── Close a specialist tab ─────────────────────────────────────────────────
+  const closeTab = (tabId) => {
+    if (tabId === GAIA_TAB) return; // Gaia main is permanent
+    setTabs((prev) => prev.filter((t) => t.id !== tabId));
+    // Switch back to Gaia (or previous tab)
+    setActiveTab(GAIA_TAB);
+  };
+
+  // ── Verbatim save (Gaia tab only) ─────────────────────────────────────────
   const saveVerbatim = async (allMessages) => {
     const turns = allMessages.map((m) => ({ role: m.role, text: m.content }));
     const content = allMessages
@@ -101,27 +273,20 @@ export function ChatDialog({ open, onOpenChange }) {
     return turns;
   };
 
-  // Embedding (chunk + whole-object) happens once per conversation, on
-  // close — re-embedding after every single message would recompute the
-  // same chunks over and over for no benefit while the conversation is
-  // still ongoing.
   const handleOpenChange = (next) => {
     if (!next && chatObjectIdRef.current) {
-      const turns = messages.map((m) => ({ role: m.role, text: m.content }));
-      const content = messages
+      const gaiaMessages = getTabMessages(GAIA_TAB);
+      const turns = gaiaMessages.map((m) => ({ role: m.role, text: m.content }));
+      const content = gaiaMessages
         .map((m) => `${m.role === "user" ? "User" : "Gaia"}: ${m.content}`)
         .join("\n\n");
       embedObject(chatObjectIdRef.current, turns, content).catch(() => {});
-      chatObjectIdRef.current = null; // next open starts a fresh conversation object
+      chatObjectIdRef.current = null;
     }
     onOpenChange(next);
   };
 
-  // Live consolidation — scans the conversation so far (via the already-
-  // saved chat object) for persona kenmerken, reusing the exact same
-  // create/reinforce/resurrect pipeline as the normal background detection
-  // (POST /api/persona/kenmerken). Runs every N exchanges (Settings), not
-  // after every message — an LLM call each turn would be wasteful.
+  // ── Live consolidation ────────────────────────────────────────────────────
   const consolidateLive = async (fullHistory) => {
     const { apiUrl } = getSettings();
     if (!apiUrl || !AIService.isConfigured() || !chatObjectIdRef.current) return;
@@ -172,27 +337,37 @@ export function ChatDialog({ open, onOpenChange }) {
     }
   };
 
-  const sendMessage = async (text) => {
+  // ── Send message (routes to Gaia or specialist chat based on tabId) ────────
+  const sendMessage = async (tabId, text) => {
     if (!text.trim() || sending) return;
-
-    const userMessage = { role: "user", content: text.trim() };
-    setMessages((prev) => [...prev, userMessage]);
-    setInput("");
     setSending(true);
 
+    const userMessage = { role: "user", content: text };
+    setTabMessages(tabId, (prev) => [...prev, userMessage]);
+
     try {
-      // Gather conversation history (excluding system prompt which is injected in chatWithGaia)
-      const chatHistory = [...messages, userMessage];
-      const reply = await AIService.chatWithGaia(chatHistory);
+      const currentMessages = getTabMessages(tabId);
+      const chatHistory = [...currentMessages, userMessage];
+
+      let reply;
+      if (tabId === GAIA_TAB) {
+        reply = await AIService.chatWithGaia(chatHistory);
+      } else {
+        // Direct specialist call
+        const tab = tabs.find((t) => t.id === tabId);
+        reply = await AIService.chatWithSpecialist(tab.specialistName, chatHistory);
+      }
 
       const fullHistory = [...chatHistory, { role: "assistant", content: reply }];
-      setMessages(fullHistory);
-      saveVerbatim(fullHistory); // best-effort, doesn't block the UI
+      setTabMessages(tabId, fullHistory);
 
-      exchangeCountRef.current += 1;
-      const n = settings.gaiaConsolidateEveryNTurns;
-      if (n > 0 && exchangeCountRef.current % n === 0) {
-        consolidateLive(fullHistory); // best-effort, doesn't block the UI
+      if (tabId === GAIA_TAB) {
+        saveVerbatim(fullHistory);
+        exchangeCountRef.current += 1;
+        const n = settings.gaiaConsolidateEveryNTurns;
+        if (n > 0 && exchangeCountRef.current % n === 0) {
+          consolidateLive(fullHistory);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -206,180 +381,130 @@ export function ChatDialog({ open, onOpenChange }) {
     }
   };
 
-  const handleSend = async (e) => {
-    e.preventDefault();
-    sendMessage(input);
-  };
-
-  // Quick-action shortcuts (GaiaQuickActions): a non-empty prompt sends
-  // immediately — these are fixed, safe, read-only prompts, not arbitrary
-  // AI-generated actions. An empty prompt (the "ask something specific"
-  // shortcut) just focuses the input instead of sending anything.
-  const handleQuickAction = (prompt) => {
-    if (prompt) {
-      sendMessage(prompt);
-    } else {
-      inputRef.current?.focus();
-    }
-  };
-
   const handleClear = () => {
-    if (window.confirm("Are you sure you want to clear the conversation history?")) {
-      setMessages([]);
-      chatObjectIdRef.current = null; // the saved record stays intact — this only starts a fresh one
+    if (!window.confirm("Clear this conversation history?")) return;
+    setTabMessages(activeTab, []);
+    if (activeTab === GAIA_TAB) {
+      chatObjectIdRef.current = null;
       exchangeCountRef.current = 0;
       setExtractedKenmerken([]);
       setExtractedKennis([]);
     }
   };
 
+  const handleQuickAction = (prompt) => {
+    if (prompt) sendMessage(GAIA_TAB, prompt);
+    else inputRef.current?.focus();
+  };
+
+  const activeTabData = tabs.find((t) => t.id === activeTab) || tabs[0];
+  const currentMessages = activeTabData?.messages || [];
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-4xl h-[75vh] flex p-0 overflow-hidden">
-        {/* Left: chat column */}
+
+        {/* ── Left: chat column ─────────────────────────────────────────── */}
         <div className="flex-1 min-w-0 flex flex-col p-6 overflow-hidden">
-        {/* Header */}
-        <DialogHeader className="border-b border-border/60 pb-3 shrink-0 flex flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <MessageSquare className="w-5 h-5" />
-            </div>
-            <div>
-              <DialogTitle className="font-serif text-lg text-ink">Chat with Gaia</DialogTitle>
-              <p className="text-[11px] text-muted-foreground">Interactive conversation powered by your local memory context.</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 pr-6">
-            <div className="flex items-center gap-1.5 rounded-lg border border-border bg-accent/20 px-2.5 py-1 text-[10px] text-muted-foreground font-mono">
-              <Cpu className="w-3.5 h-3.5 text-primary" />
-              <span>{activeModel.replace("nousresearch/", "")}</span>
-            </div>
-            <button
-              onClick={() => setShowKennisPanel((v) => !v)}
-              className={`rounded-lg p-1.5 transition-all ${
-                showKennisPanel ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-ink hover:bg-accent/40"
-              }`}
-              title="Toggle extracted knowledge panel"
-            >
-              <BrainCircuit className="w-4 h-4" />
-            </button>
-            {messages.length > 0 && (
-              <button
-                onClick={handleClear}
-                className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/5 transition-all"
-                title="Clear chat history"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        </DialogHeader>
 
-        {/* Message Stream */}
-        <div className="flex-1 overflow-y-auto py-4 space-y-4 no-scrollbar bg-background/25 rounded-xl border border-border/30 px-3">
-          {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">
-              <div className="rounded-full bg-primary/5 p-4 text-primary animate-pulse">
-                <Sparkles className="w-8 h-8" />
+          {/* Header */}
+          <DialogHeader className="border-b border-border/60 pb-3 shrink-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <DialogTitle className="font-serif text-lg text-ink">Chat with Gaia</DialogTitle>
+                  <p className="text-[11px] text-muted-foreground">
+                    Interactive conversation powered by your local memory context.
+                  </p>
+                </div>
               </div>
-              <div className="space-y-1.5 max-w-sm">
-                <h4 className="font-serif text-base font-semibold text-ink">Meet Gaia</h4>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  I can answer questions, analyze concepts, or assist you with coding tasks. I automatically factor in your confirmed memory traits (e.g. your stack choices, working habits, and tech preferences) to tailor answers for you.
-                </p>
+              <div className="flex items-center gap-3 pr-6">
+                <div className="flex items-center gap-1.5 rounded-lg border border-border bg-accent/20 px-2.5 py-1 text-[10px] text-muted-foreground font-mono">
+                  <Cpu className="w-3.5 h-3.5 text-primary" />
+                  <span>{activeModel.replace("nousresearch/", "")}</span>
+                </div>
+                <button
+                  onClick={() => setShowKennisPanel((v) => !v)}
+                  className={`rounded-lg p-1.5 transition-all ${
+                    showKennisPanel ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-ink hover:bg-accent/40"
+                  }`}
+                  title="Toggle extracted knowledge panel"
+                >
+                  <BrainCircuit className="w-4 h-4" />
+                </button>
+                {currentMessages.length > 0 && (
+                  <button
+                    onClick={handleClear}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/5 transition-all"
+                    title="Clear chat history"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
-              <GaiaQuickActions onSelect={handleQuickAction} />
             </div>
-          ) : (
-            <div className="space-y-4">
-              {messages.map((msg, idx) => {
-                const isAssistant = msg.role === "assistant";
-                const { text, suggestions } = isAssistant ? parseSuggestions(msg.content) : { text: msg.content, suggestions: [] };
-                return (
-                  <div key={idx} className="space-y-2">
-                    <div
-                      className={`flex gap-3 max-w-[85%] ${
-                        msg.role === "user" ? "ml-auto flex-row-reverse" : "mr-auto"
-                      }`}
-                    >
-                      {/* Avatar */}
-                      <div
-                        className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-lg text-xs font-semibold ${
-                          msg.role === "user"
-                            ? "bg-primary/20 text-primary"
-                            : "bg-accent text-accent-foreground"
-                        }`}
-                      >
-                        {msg.role === "user" ? <User className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                      </div>
 
-                      {/* Bubble */}
-                      <div
-                        className={`rounded-xl px-4 py-2.5 text-xs leading-relaxed shadow-sm ${
-                          msg.role === "user"
-                            ? "bg-primary text-primary-foreground font-sans font-medium"
-                            : "bg-card border border-border/80 text-ink font-sans whitespace-pre-wrap"
-                        }`}
-                      >
-                        {text}
-                      </div>
-                    </div>
+            {/* ── Tab bar (only visible when specialist tabs are open) ─── */}
+            {tabs.length > 1 && (
+              <div className="flex items-center gap-1 mt-3 overflow-x-auto no-scrollbar">
+                {tabs.map((tab) => (
+                  <div
+                    key={tab.id}
+                    className={`group relative flex items-center gap-1.5 rounded-t-lg px-3 py-1.5 text-[11px] font-medium cursor-pointer transition-all select-none ${
+                      activeTab === tab.id
+                        ? "bg-background border border-b-background border-border/60 text-ink -mb-px z-10"
+                        : "bg-accent/30 text-muted-foreground hover:text-ink hover:bg-accent/50"
+                    }`}
+                    onClick={() => setActiveTab(tab.id)}
+                  >
+                    {tab.isGaia ? (
+                      <Sparkles className="w-3 h-3 text-primary" />
+                    ) : (
+                      <Bot className="w-3 h-3 text-primary/70" />
+                    )}
+                    <span className="max-w-[120px] truncate">{tab.label}</span>
 
-                    {isAssistant && suggestions.length > 0 && idx === messages.length - 1 && (
-                      <div className="flex flex-wrap gap-2 pl-11 max-w-[85%]">
-                        {suggestions.map((suggestion, sIdx) => (
-                          <button
-                            key={sIdx}
-                            onClick={() => sendMessage(suggestion)}
-                            disabled={sending}
-                            className="text-[11px] font-sans text-primary hover:text-primary-foreground border border-primary/30 hover:border-primary hover:bg-primary/10 rounded-full px-3 py-1 bg-card transition-all active:scale-95 text-left disabled:opacity-50"
-                          >
-                            {suggestion}
-                          </button>
-                        ))}
-                      </div>
+                    {/* ✕ close button — only for specialist tabs */}
+                    {!tab.isGaia && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          closeTab(tab.id);
+                        }}
+                        className="ml-0.5 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-destructive/15 hover:text-destructive text-muted-foreground transition-all"
+                        title={`Close ${tab.label} chat`}
+                        aria-label={`Close ${tab.label} tab`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
                     )}
                   </div>
-                );
-              })}
+                ))}
+              </div>
+            )}
+          </DialogHeader>
 
-              {sending && (
-                <div className="flex gap-3 max-w-[85%] mr-auto items-center">
-                  <div className="h-8 w-8 shrink-0 flex items-center justify-center rounded-lg bg-accent text-accent-foreground">
-                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                  </div>
-                  <div className="bg-card border border-border/80 rounded-xl px-4 py-2.5 text-xs text-muted-foreground italic font-sans flex items-center gap-1.5">
-                    <span>Gaia is reasoning...</span>
-                  </div>
-                </div>
-              )}
-              <div ref={scrollRef} />
-            </div>
-          )}
+          {/* ── Chat pane for active tab ─────────────────────────────────── */}
+          <div className="flex-1 min-h-0 flex flex-col pt-4 overflow-hidden">
+            <ChatPane
+              key={activeTab}
+              tabId={activeTab}
+              isGaia={activeTabData?.isGaia ?? true}
+              specialistName={activeTabData?.specialistName}
+              messages={currentMessages}
+              sending={sending}
+              onSendMessage={sendMessage}
+              onClear={handleClear}
+              onQuickAction={handleQuickAction}
+              inputRef={activeTabData?.isGaia ? inputRef : null}
+            />
+          </div>
         </div>
 
-        {/* Input Bar */}
-        <form onSubmit={handleSend} className="pt-3 border-t border-border/60 shrink-0 flex items-center gap-2.5">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            disabled={sending}
-            placeholder={sending ? "Waiting for agent..." : "Type a message to Gaia..."}
-            className="flex-1 rounded-xl border border-border bg-background/50 px-4 py-2.5 text-xs text-ink focus:outline-none focus:border-primary/50 focus:bg-background transition-all disabled:opacity-50"
-          />
-          <button
-            type="submit"
-            disabled={sending || !input.trim()}
-            className="rounded-xl bg-ink p-2.5 text-background hover:bg-ink/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </form>
-        </div>
-
-        {/* Right: extracted-knowledge panel */}
+        {/* ── Right: extracted-knowledge panel ─────────────────────────── */}
         {showKennisPanel && (
           <div className="w-72 shrink-0 border-l border-border/60 bg-accent/10 flex flex-col overflow-hidden">
             <div className="flex items-center gap-2 p-4 pb-3 border-b border-border/40 shrink-0">
@@ -388,8 +513,7 @@ export function ChatDialog({ open, onOpenChange }) {
               {consolidating && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground ml-auto" />}
             </div>
             <div className="flex-1 overflow-y-auto no-scrollbar p-4 space-y-5">
-              {/* Persona knowledge — claims about the owner, subject to the
-                  observation→hypothesis→confirmed trust ladder. */}
+              {/* Persona knowledge */}
               <div className="space-y-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
                   Over jou
@@ -416,8 +540,7 @@ export function ChatDialog({ open, onOpenChange }) {
                 )}
               </div>
 
-              {/* General knowledge — facts/concepts from the content itself,
-                  not about the owner. No trust ladder — just kennis-objects. */}
+              {/* General knowledge */}
               <div className="space-y-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
                   Algemene kennis

@@ -10,7 +10,7 @@ import { findRelated } from "./ai/relatedness";
 import { suggestPersonaKenmerken, reflectTemporalBeliefs } from "./ai/personaSuggestions";
 import { generatePulse } from "./ai/pulseGen";
 import { generateSpecialistPrompt } from "./ai/specialistGen";
-import { chatWithHermes, chatWithGaia } from "./ai/gaiaChat";
+import { chatWithHermes, chatWithGaia, chatWithSpecialist } from "./ai/gaiaChat";
 
 export const AIService = {
   isConfigured,
@@ -23,6 +23,7 @@ export const AIService = {
   generateSpecialistPrompt,
   chatWithHermes,
   chatWithGaia,
+  chatWithSpecialist,
   getTokenStats,
   clearTokenStats,
 };
