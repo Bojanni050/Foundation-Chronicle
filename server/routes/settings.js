@@ -2,7 +2,6 @@ const express = require("express");
 const { TOKEN } = require("../auth");
 const { getModel: getEmbeddingModel, setModel: setEmbeddingModel, MODEL_OPTIONS } = require("../embedding");
 const { reembedAllRows } = require("../reembed");
-const { isEnabled: isActivityAgentEnabled, setEnabled: setActivityAgentEnabled } = require("../activityAgentConfig");
 const { getGaiaHermesConfig } = require("../gaia-backend/gaiaHermesManager");
 
 const router = express.Router();
@@ -24,21 +23,6 @@ router.get("/gaia-hermes-config", (_req, res) => {
 // GET /api/settings/token
 router.get("/token", (_req, res) => {
   res.json({ token: TOKEN });
-});
-
-// GET/PATCH /api/settings/activity-agent — whether Chronicle auto-starts the
-// native activity-agent (UI-Automation-based foreground-window capture)
-// alongside itself. Defaults to enabled. No separate privacy-proxy route
-// here (unlike the old PureMemory one it replaces): activity-agent only
-// ever captures window title + visible UI text, never clipboard content, so
-// there's no extra flag to surface.
-router.get("/activity-agent", (_req, res) => {
-  res.json({ enabled: isActivityAgentEnabled() });
-});
-
-router.patch("/activity-agent", (req, res) => {
-  setActivityAgentEnabled(req.body?.enabled);
-  res.json({ enabled: isActivityAgentEnabled() });
 });
 
 // GET /api/settings/embedding-model

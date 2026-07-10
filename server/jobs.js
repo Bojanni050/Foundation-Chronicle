@@ -1,7 +1,6 @@
 const { pool } = require("./db");
 const { embed } = require("./embedding");
 const { getOrCreateInstelling } = require("./personaHelper");
-const { startPureMemoryIngest } = require("./purememoryIngest");
 const { getGaiaHermesConfig } = require("./gaia-backend/gaiaHermesManager");
 const { flagContradiction, hasUnresolvedTopicFor } = require("./gaiaProactiveTopics");
 
@@ -192,12 +191,12 @@ function startBackgroundJobs() {
   setTimeout(runAutoHealEmbeddings, 10000);  // 10 seconds after startup
   setTimeout(consolidateKenmerken, 12000);   // 12 seconds after startup
 
-  // Screenpipe is gated behind its own subscription now and unusable, and
-  // PureMemory's external Go collector-agent has been replaced by
-  // activity-agent (native Rust, UI-Automation-based) — best-effort, same
-  // never-block-startup posture as the rest of Chronicle's local-agent-
-  // optional features.
-  startActivityAgent();
+  // Screenpipe is gated behind its own subscription now and unusable.
+  // PureMemory's external Go collector-agent has been replaced by native
+  // Windows UI Automation capture embedded directly in the Tauri app (see
+  // src-tauri/src/uia_capture.rs) — unlike PureMemory, that one is started
+  // by the frontend (via a Tauri command) rather than spawned here, so
+  // there's nothing left for the Node server to start on its behalf.
 }
 
 module.exports = {
