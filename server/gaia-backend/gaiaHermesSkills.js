@@ -23,12 +23,12 @@ function readSkillDescription(skillDir) {
         .map((line) => line.trim())
         .find((line) => line && !line.startsWith("#") && !line.startsWith("---"));
       if (description) return description.slice(0, 240);
-    } catch {
-      // Try the next conventional entrypoint.
+    } catch {xt conventional entrypoint.
     }
   }
   return "Hermes skill";
-}
+
+      // Try the ne}
 
 function scanSkillDirectory(root) {
   if (!root || !fs.existsSync(root)) return [];

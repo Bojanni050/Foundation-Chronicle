@@ -10,5 +10,6 @@ router.use(require("./instelling"));
 router.use(require("./pulse"));
 router.use(require("./kenmerken"));
 router.use(require("./reflectie"));
+router.use(require("./proactiveTopics"));
 
 module.exports = router;

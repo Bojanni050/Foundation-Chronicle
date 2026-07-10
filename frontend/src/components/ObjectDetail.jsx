@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare } from "lucide-react";
+import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare, Lock, Unlock } from "lucide-react";
 import { objectRepository } from "@/repositories";
 import { AIService, keywordTags } from "@/services/AIService";
 import { typeMeta } from "@/lib/objectTypes";
@@ -47,6 +47,8 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
   const [showTemporal, setShowTemporal] = useState(false);
   const [saveState, setSaveState] = useState("saved"); // saved | saving
   const [aiNote, setAiNote] = useState("");
+  const [locked, setLocked] = useState(!!object.locked);
+  const [lockBusy, setLockBusy] = useState(false);
   const timer = useRef(null);
   const idRef = useRef(object.id);
   const pending = useRef({});
@@ -70,6 +72,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
     setShowTemporal(!!(object.occurredAt || object.validFrom || object.validTo || object.temporalText));
     setSaveState("saved");
     setAiNote("");
+    setLocked(!!object.locked);
     // content-first capture: a fresh, empty entry drops the cursor straight
     // into the writing surface — no type to pick first.
     if (!object.title && !object.content) {
@@ -90,12 +93,27 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
   }, [onSaved]);
 
   const change = (field, value, setter) => {
+    if (locked) return; // inputs are also disabled while locked — this is a backstop
     setter(value);
     pending.current = { ...pending.current, [field]: value };
     persist();
   };
 
+  const toggleLock = async () => {
+    setLockBusy(true);
+    try {
+      const updated = await objectRepository.update(object.id, { locked: !locked });
+      if (updated) {
+        setLocked(updated.locked);
+        onSaved(updated);
+      }
+    } finally {
+      setLockBusy(false);
+    }
+  };
+
   const handleDateChange = (field, value, setter) => {
+    if (locked) return;
     setter(value);
     let isoValue = null;
     if (value) {
@@ -139,7 +157,8 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
           if (e.key === "Enter") { e.preventDefault(); contentAreaRef.current?.focus(); }
         }}
         placeholder="Untitled"
-        className="w-full shrink-0 bg-transparent font-serif text-4xl leading-tight text-ink placeholder:text-muted-foreground/30 focus:outline-none"
+        disabled={locked}
+        className="w-full shrink-0 bg-transparent font-serif text-4xl leading-tight text-ink placeholder:text-muted-foreground/30 focus:outline-none disabled:opacity-70 disabled:cursor-not-allowed"
       />
 
       <textarea
@@ -148,13 +167,14 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
         value={content}
         onChange={(e) => change("content", e.target.value, setContent)}
         placeholder="Start writing…"
-        className="mt-4 flex-1 w-full resize-none bg-transparent text-base leading-relaxed text-ink/90 placeholder:text-muted-foreground/40 focus:outline-none no-scrollbar whitespace-pre-wrap"
+        disabled={locked}
+        className="mt-4 flex-1 w-full resize-none bg-transparent text-base leading-relaxed text-ink/90 placeholder:text-muted-foreground/40 focus:outline-none no-scrollbar whitespace-pre-wrap disabled:opacity-70 disabled:cursor-not-allowed"
       />
 
       {/* subtle metadata bar — everything about classifying comes AFTER writing */}
       <div className="mt-4 shrink-0 border-t border-border pt-3">
         <div className="mb-2.5">
-          <TagEditor tags={tags} onChange={(t) => change("tags", t, setTags)} onSuggest={suggest} aiNote={aiNote} />
+          <TagEditor tags={tags} onChange={(t) => change("tags", t, setTags)} onSuggest={suggest} aiNote={aiNote} disabled={locked} />
         </div>
 
         {/* Collapsible Temporal Metadata */}
@@ -183,7 +203,8 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
                   data-testid="temporal-occurred-input"
                   value={occurredAt}
                   onChange={(e) => handleDateChange("occurredAt", e.target.value, setOccurredAt)}
-                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary/40"
+                  disabled={locked}
+                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary/40 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -194,7 +215,8 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
                   data-testid="temporal-text-input"
                   value={temporalText}
                   onChange={(e) => change("temporalText", e.target.value || null, setTemporalText)}
-                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-ink placeholder:text-muted-foreground/35 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary/40"
+                  disabled={locked}
+                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-ink placeholder:text-muted-foreground/35 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary/40 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -204,7 +226,8 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
                   data-testid="temporal-valid-from-input"
                   value={validFrom}
                   onChange={(e) => handleDateChange("validFrom", e.target.value, setValidFrom)}
-                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary/40"
+                  disabled={locked}
+                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary/40 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -214,7 +237,8 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
                   data-testid="temporal-valid-to-input"
                   value={validTo}
                   onChange={(e) => handleDateChange("validTo", e.target.value, setValidTo)}
-                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary/40"
+                  disabled={locked}
+                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-ink focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary/40 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
@@ -225,6 +249,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
           <Select
             value={allTypes.some((t) => t.key === type) ? type : "untyped"}
             onValueChange={(v) => change("type", v === "untyped" ? null : v, setType)}
+            disabled={locked}
           >
             <SelectTrigger className="h-7 w-auto gap-1.5 border-none bg-transparent px-1.5 text-xs text-muted-foreground hover:text-ink hover:bg-accent/50 rounded-md" data-testid="type-select">
               <meta.icon className="w-3.5 h-3.5 text-primary/80" strokeWidth={1.75} />
@@ -294,10 +319,22 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
               )}
             </span>
             <button
-              onClick={() => onDelete(object.id)}
+              onClick={toggleLock}
+              disabled={lockBusy}
+              data-testid="lock-toggle-btn"
+              className={`transition-colors disabled:opacity-40 ${locked ? "text-primary hover:text-primary/70" : "hover:text-ink"}`}
+              aria-label={locked ? "Unlock entry" : "Lock entry"}
+              title={locked ? "Locked — click to unlock and edit again" : "Lock this entry so it can't be edited or deleted"}
+            >
+              {locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={() => !locked && onDelete(object.id)}
+              disabled={locked}
               data-testid="delete-object-btn"
-              className="hover:text-destructive transition-colors"
+              className="hover:text-destructive transition-colors disabled:opacity-30 disabled:hover:text-current disabled:cursor-not-allowed"
               aria-label="Delete entry"
+              title={locked ? "Unlock this entry before deleting it" : "Delete entry"}
             >
               <Trash2 className="w-4 h-4" />
             </button>

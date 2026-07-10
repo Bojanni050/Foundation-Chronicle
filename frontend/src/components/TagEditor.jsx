@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { X, Sparkles, Loader2 } from "lucide-react";
 
-export function TagEditor({ tags = [], onChange, onSuggest, aiNote }) {
+export function TagEditor({ tags = [], onChange, onSuggest, aiNote, disabled = false }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -36,32 +36,36 @@ export function TagEditor({ tags = [], onChange, onSuggest, aiNote }) {
             className="group inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground"
           >
             #{t}
-            <button
-              onClick={() => remove(t)}
-              className="opacity-40 hover:opacity-100 transition-opacity"
-              data-testid={`tag-remove-${t}`}
-              aria-label={`Remove ${t}`}
-            >
-              <X className="w-3 h-3" />
-            </button>
+            {!disabled && (
+              <button
+                onClick={() => remove(t)}
+                className="opacity-40 hover:opacity-100 transition-opacity"
+                data-testid={`tag-remove-${t}`}
+                aria-label={`Remove ${t}`}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </span>
         ))}
-        <input
-          data-testid="tag-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              add(input);
-            } else if (e.key === "Backspace" && !input && tags.length) {
-              remove(tags[tags.length - 1]);
-            }
-          }}
-          placeholder="add tag…"
-          className="min-w-[80px] flex-1 bg-transparent text-xs text-ink placeholder:text-muted-foreground/60 focus:outline-none py-1"
-        />
-        {onSuggest && (
+        {!disabled && (
+          <input
+            data-testid="tag-input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add(input);
+              } else if (e.key === "Backspace" && !input && tags.length) {
+                remove(tags[tags.length - 1]);
+              }
+            }}
+            placeholder="add tag…"
+            className="min-w-[80px] flex-1 bg-transparent text-xs text-ink placeholder:text-muted-foreground/60 focus:outline-none py-1"
+          />
+        )}
+        {onSuggest && !disabled && (
           <button
             onClick={suggest}
             disabled={busy}
