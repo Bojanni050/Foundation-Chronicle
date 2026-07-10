@@ -30,23 +30,51 @@ function readSkillDescription(skillDir) {
   return "Hermes skill";
 }
 
+function hasSkillFile(dir) {
+  return fs.existsSync(path.join(dir, "SKILL.md")) || fs.existsSync(path.join(dir, "skill.md"));
+}
+
+function toSkill(dir, name) {
+  return { name, label: humanize(name), description: readSkillDescription(dir) };
+}
+
+// Skills can sit either directly under root (root/<name>/SKILL.md — how
+// `hermes skills install` places a flat, hub-installed skill like
+// "humanizer") or one level deeper inside a category folder
+// (root/<category>/<name>/SKILL.md — how bundled skills are grouped, e.g.
+// "software-development/foundation-chronicle-conventions"). A folder is
+// only treated as a category if it has no SKILL.md of its own; a category
+// folder with nothing installed under it yet (just its own DESCRIPTION.md)
+// correctly yields no skills. Only one extra level deep on purpose — deep
+// enough for every layout seen so far, without turning this into an
+// unbounded directory walk.
 function scanSkillDirectory(root) {
   if (!root || !fs.existsSync(root)) return [];
+  const results = [];
   try {
-    return fs.readdirSync(root, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .filter((entry) =>
-        fs.existsSync(path.join(root, entry.name, "SKILL.md")) ||
-        fs.existsSync(path.join(root, entry.name, "skill.md"))
-      )
-      .map((entry) => ({
-        name: entry.name,
-        label: humanize(entry.name),
-        description: readSkillDescription(path.join(root, entry.name)),
-      }));
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const entryPath = path.join(root, entry.name);
+      if (hasSkillFile(entryPath)) {
+        results.push(toSkill(entryPath, entry.name));
+        continue;
+      }
+      try {
+        for (const sub of fs.readdirSync(entryPath, { withFileTypes: true })) {
+          if (!sub.isDirectory()) continue;
+          const subPath = path.join(entryPath, sub.name);
+          if (hasSkillFile(subPath)) {
+            results.push(toSkill(subPath, sub.name));
+          }
+        }
+      } catch {
+        // entryPath not readable as a directory — skip it, not a category.
+      }
+    }
   } catch {
     return [];
   }
+  return results;
 }
 
 function parseCliSkillList(output) {
