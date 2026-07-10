@@ -290,13 +290,16 @@ export default function App() {
 
       {/* Gaia bubble — always-available, independent trigger for the floating
           chat widget (in addition to the sidebar's "AI Chat (Gaia)" entry).
-          Hidden while the widget itself is open to avoid overlapping it. */}
+          Hidden while the widget itself is open to avoid overlapping it.
+          Centered on the third column's left border (Sidebar 264px +
+          ObjectList 360px = 624px in), vertically centered on the viewport —
+          straddling the seam between ObjectList and the main detail pane. */}
       {!dlg.chat && (
         <button
           onClick={() => setDlg((d) => ({ ...d, chat: true }))}
           data-testid="gaia-chat-bubble"
           title="Chat with Gaia"
-          className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-background shadow-2xl border border-border hover:scale-105 transition-transform overflow-hidden relative"
+          className="fixed left-[624px] top-1/2 z-40 flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-background shadow-2xl border border-border hover:scale-105 transition-transform overflow-hidden"
         >
           <img src="/gaia-avatar.jpg" alt="Gaia" className="h-full w-full object-cover object-top" />
           {hasPendingTopic && (
