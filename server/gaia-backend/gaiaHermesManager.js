@@ -1,4 +1,4 @@
-const { spawn } = require("child_process");
+const { spawn, execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
@@ -9,6 +9,51 @@ const fs = require("fs");
 // on anything already on the host account.
 const GAIA_HERMES_HOME = path.join(__dirname, ".hermes-home");
 const GAIA_HERMES_PORT = process.env.GAIA_HERMES_PORT || 9120;
+
+// PID file tracks the last-known gateway process so we can clean it up on
+// restart — prevents the "already running" error when the Node server is
+// restarted without the gateway having been explicitly stopped first.
+const PID_FILE = path.join(GAIA_HERMES_HOME, "gateway.pid");
+
+function writePid(pid) {
+  try {
+    fs.mkdirSync(GAIA_HERMES_HOME, { recursive: true });
+    fs.writeFileSync(PID_FILE, String(pid));
+  } catch (err) {
+    console.error("[Gaia-Hermes] Could not write PID file:", err.message);
+  }
+}
+
+function clearPid() {
+  try { fs.unlinkSync(PID_FILE); } catch { /* already gone */ }
+}
+
+// Kill any stale Hermes gateway that is still occupying the port.
+// On Windows we use taskkill on the saved PID (and its entire process tree)
+// before attempting a fresh start.
+function killStalePid() {
+  let pid = null;
+  try {
+    pid = parseInt(fs.readFileSync(PID_FILE, "utf8").trim(), 10);
+  } catch { return; } // no PID file — nothing to clean up
+
+  if (!pid || isNaN(pid)) { clearPid(); return; }
+
+  console.log(`[Gaia-Hermes] Killing stale gateway process (PID ${pid})...`);
+  try {
+    if (process.platform === "win32") {
+      execSync(`taskkill /pid ${pid} /f /t`, { stdio: "ignore" });
+    } else {
+      process.kill(pid, "SIGTERM");
+    }
+  } catch {
+    // Process already gone — that's fine.
+  }
+  clearPid();
+
+  // Give the OS a moment to release the port before we spawn the new one.
+  return new Promise((resolve) => setTimeout(resolve, 600));
+}
 
 // Reads API_SERVER_KEY straight from the instance's own .env — never
 // hardcoded or duplicated in frontend settings/localStorage. This is the
@@ -34,11 +79,14 @@ function getGaiaHermesConfig() {
 let gaiaHermesProcess = null;
 let stoppingIntentionally = false;
 
-function startGaiaHermes() {
+async function startGaiaHermes() {
   if (gaiaHermesProcess) {
-    console.log("[Gaia-Hermes] Already running, skipping start.");
+    console.log("[Gaia-Hermes] Already running in this process, skipping start.");
     return;
   }
+
+  // Kill any orphaned gateway from a previous server run before starting.
+  await killStalePid();
 
   stoppingIntentionally = false;
 
@@ -53,17 +101,25 @@ function startGaiaHermes() {
     }
   );
 
+  writePid(gaiaHermesProcess.pid);
+
   gaiaHermesProcess.stdout.on("data", (data) => {
     console.log(`[Gaia-Hermes] ${data.toString().trim()}`);
   });
 
   gaiaHermesProcess.stderr.on("data", (data) => {
-    console.error(`[Gaia-Hermes:err] ${data.toString().trim()}`);
+    const msg = data.toString().trim();
+    // Suppress the duplicate-instance warning — it's expected transiently
+    // while the previous process is finishing its shutdown.
+    if (!msg.includes("already running")) {
+      console.error(`[Gaia-Hermes:err] ${msg}`);
+    }
   });
 
   gaiaHermesProcess.on("exit", (code, signal) => {
     console.log(`[Gaia-Hermes] Process exited (code=${code}, signal=${signal})`);
     gaiaHermesProcess = null;
+    clearPid();
 
     if (!stoppingIntentionally) {
       console.log("[Gaia-Hermes] Unexpected exit — restarting in 3s...");
@@ -74,6 +130,7 @@ function startGaiaHermes() {
   gaiaHermesProcess.on("error", (err) => {
     console.error("[Gaia-Hermes] Failed to start:", err.message);
     gaiaHermesProcess = null;
+    clearPid();
   });
 }
 
@@ -89,6 +146,7 @@ function stopGaiaHermes() {
     gaiaHermesProcess.kill("SIGTERM");
   }
   gaiaHermesProcess = null;
+  clearPid();
 }
 
 module.exports = { startGaiaHermes, stopGaiaHermes, getGaiaHermesConfig, GAIA_HERMES_PORT };
