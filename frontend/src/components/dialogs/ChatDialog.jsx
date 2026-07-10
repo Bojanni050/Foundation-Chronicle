@@ -244,6 +244,11 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
   );
   const chatObjectIdRef = useRef(null);
   const exchangeCountRef = useRef(0);
+  // How many messages of the current Gaia conversation have already been sent
+  // to live consolidation. Without this, consolidateLive() re-sends the whole
+  // (ever-growing) transcript every N turns, so turns 1-5 get re-extracted at
+  // turn 10, again at turn 15, etc. — same info, same entry, duplicated.
+  const consolidatedUpToRef = useRef(0);
   const resumedIdRef = useRef(null); // avoid re-loading the same object on re-renders
 
   const [extractedKenmerken, setExtractedKenmerken] = useState([]);
@@ -282,6 +287,10 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
     setActiveTab(GAIA_TAB);
     chatObjectIdRef.current = resumeObject.id;
     exchangeCountRef.current = Math.floor(parsed.length / 2);
+    // Treat everything already in the resumed transcript as a baseline, not
+    // as new content to (re-)consolidate — it was already saved verbatim
+    // last time this chat was open.
+    consolidatedUpToRef.current = parsed.length;
     setResumeBanner({ title: resumeObject.title || "Vorig gesprek" });
     setTimeout(() => setResumeBanner(null), 3500);
   }, [open, resumeObject]);
@@ -374,9 +383,16 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
   const consolidateLive = async (fullHistory) => {
     const { apiUrl } = getSettings();
     if (!apiUrl || !AIService.isConfigured() || !chatObjectIdRef.current) return;
+
+    // Only the messages since the last live pass — sending fullHistory here
+    // every time would re-extract the same earlier turns' info on every
+    // subsequent pass (see consolidatedUpToRef above).
+    const newMessages = fullHistory.slice(consolidatedUpToRef.current);
+    if (newMessages.length === 0) return;
+
     setConsolidating(true);
     try {
-      const content = fullHistory
+      const content = newMessages
         .map((m) => `${m.role === "user" ? "User" : "Gaia"}: ${m.content}`)
         .join("\n\n");
       const title = (fullHistory[0]?.content || "Gesprek met Gaia").slice(0, 80);
@@ -387,6 +403,30 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
       const candidates = await AIService.suggestPersonaKenmerken(rejected.slice(0, 20), [
         { id: chatObjectIdRef.current, type: "chat", title, content },
       ]);
+      // Extraction itself succeeded — advance the watermark now so a failure
+      // in an individual candidate save below (each has its own try/catch)
+      // doesn't cause this same range to be re-sent next pass.
+      consolidatedUpToRef.current = fullHistory.length;
+
+      // Also persist onto the object itself, using the same field the full
+      // scan (personaSync.js's detectPersonaKenmerken) already reads and
+      // writes. Without this, a later full scan has no way to know this
+      // chat was already live-consolidated and re-extracts its entire
+      // content again — consolidatedUpToRef alone only guards against
+      // duplicate work within this one open dialog, not across a reload or
+      // the separate full-scan path. Preserving the object's current
+      // updatedAt (rather than defaulting to now) keeps this a pure
+      // metadata write: any further turns still correctly look unprocessed
+      // to the full scan.
+      const current = await objectRepository.getById(chatObjectIdRef.current);
+      if (current) {
+        objectRepository
+          .update(chatObjectIdRef.current, {
+            lastProcessedForPersonaAt: new Date().toISOString(),
+            updatedAt: current.updatedAt,
+          })
+          .catch(() => {});
+      }
 
       for (const c of candidates) {
         if (!c?.kenmerk || !c?.bronObjectId) continue;
@@ -473,6 +513,7 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
     if (activeTab === GAIA_TAB) {
       chatObjectIdRef.current = null;
       exchangeCountRef.current = 0;
+      consolidatedUpToRef.current = 0;
       setExtractedKenmerken([]);
       setExtractedKennis([]);
     }
