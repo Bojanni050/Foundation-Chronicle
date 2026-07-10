@@ -1,5 +1,6 @@
 import { getDB, OBJECT_STORE } from "@/lib/db";
 import { getValidTypeKeys } from "@/lib/typeRegistry";
+import { contentHash } from "@/lib/contentHash";
 
 function uid() {
   return (
@@ -41,6 +42,7 @@ export class ObjectRepository {
   async delete(_id) { throw new Error("not implemented"); }
   async search(_query) { throw new Error("not implemented"); }
   async counts() { throw new Error("not implemented"); }
+  async findByContentHash(_hash) { throw new Error("not implemented"); }
 }
 
 export class IndexedDBObjectRepository extends ObjectRepository {
@@ -51,6 +53,7 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       type: validateType(data.type),
       title: data.title != null ? data.title : "",
       content: data.content || "",
+      contentHash: data.contentHash || (data.content ? contentHash(data.content) : ""),
       tags: Array.isArray(data.tags) ? data.tags : [],
       source: data.source || "manual",
       sourceProvider: data.sourceProvider || null,
@@ -149,5 +152,12 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       else counts[o.type] = (counts[o.type] || 0) + 1;
     }
     return counts;
+  }
+
+  async findByContentHash(hash) {
+    if (!hash) return null;
+    const db = await getDB();
+    const all = await db.getAll(OBJECT_STORE);
+    return all.find((o) => o.contentHash === hash) || null;
   }
 }

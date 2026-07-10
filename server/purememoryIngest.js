@@ -14,9 +14,9 @@ const AGENT_PROCESS_NAME = path.basename(AGENT_EXE_PATH);
 let managedChild = null;
 
 // Checks Windows' own process list rather than tracking only what Chronicle
-// itself spawned — avoids launching a second instance if the agent was
-// already started manually (two processes writing to the same SQLite file
-// is asking for contention).
+// itself spawned — catches instances started manually or left over from a
+// previous run (two processes writing to the same SQLite file is asking
+// for contention).
 function isAgentAlreadyRunning() {
   return new Promise((resolve) => {
     execFile(
@@ -27,6 +27,19 @@ function isAgentAlreadyRunning() {
         resolve(stdout.toLowerCase().includes(AGENT_PROCESS_NAME.toLowerCase()));
       }
     );
+  });
+}
+
+// Force-kills any existing collector-agent process found in Windows' process
+// list. Used at startup so Chronicle always ends up running its own fresh
+// instance instead of silently reusing (or fighting with) a stale one — e.g.
+// a leftover build from manual testing.
+function killExistingAgent() {
+  return new Promise((resolve) => {
+    execFile("taskkill", ["/IM", AGENT_PROCESS_NAME, "/F"], () => {
+      // err is expected/harmless if no matching process existed
+      resolve();
+    });
   });
 }
 
@@ -43,8 +56,10 @@ async function ensureAgentRunning() {
   if (managedChild && !managedChild.killed) return; // already started by us
 
   if (await isAgentAlreadyRunning()) {
-    console.log("[PureMemory] Collector-agent already running (started outside Chronicle) — not spawning a second instance.");
-    return;
+    console.log("[PureMemory] Existing collector-agent process found — killing it before starting fresh.");
+    await killExistingAgent();
+    // Give Windows a moment to actually release the SQLite file handle.
+    await new Promise((r) => setTimeout(r, 500));
   }
 
   try {

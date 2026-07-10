@@ -1,6 +1,7 @@
 import { getSettings } from "@/lib/settings";
 import { objectRepository } from "@/repositories";
 import { embedObject } from "@/services/objectEmbedding";
+import { contentHash } from "@/lib/contentHash";
 
 /**
  * Pull queued objects from the local API inbox into IndexedDB. Returns the
@@ -33,6 +34,16 @@ export async function pollInbox() {
   let created = 0;
   for (const it of items) {
     try {
+      // Skip if an object with the same content hash already exists
+      const hash = it.contentHash || (it.content ? contentHash(it.content) : "");
+      if (hash) {
+        const existing = await objectRepository.findByContentHash(hash);
+        if (existing) {
+          created++;
+          continue;
+        }
+      }
+
       // Reuse the server-generated objectId as the IndexedDB id (instead of
       // letting create() mint its own) so this is the one stable id that
       // both IndexedDB and the Postgres chat-embedding rows agree on.

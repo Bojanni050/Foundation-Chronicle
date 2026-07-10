@@ -23,6 +23,7 @@ import { objectRepository } from "@/repositories";
 import { embedObject } from "@/services/objectEmbedding";
 import { createKennisObject } from "@/services/personaSync";
 import { GaiaQuickActions } from "@/components/GaiaQuickActions";
+import { GaiaActivityPanel } from "@/components/GaiaActivityPanel";
 import { toast } from "sonner";
 
 function parseSuggestions(content) {
@@ -181,6 +182,7 @@ function ChatPane({ tabId, isGaia, specialistName, onSendMessage, messages, send
       </div>
 
       {/* Input Bar */}
+      {isGaia && <GaiaActivityPanel active={sending} />}
       <form onSubmit={handleSend} className="pt-3 border-t border-border/60 shrink-0 flex items-center gap-2.5">
         <input
           ref={inputRef}
@@ -214,8 +216,32 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
   const [activeTab, setActiveTab] = useState(GAIA_TAB);
   const [sending, setSending] = useState(false);
   const [resumeBanner, setResumeBanner] = useState(null); // { title } shown briefly
+  // Pending Hermes approval request — { command, description, choices, resolve }.
+  // Set by handleApprovalRequest (passed to AIService.chatWithGaia), cleared
+  // once the user picks a button below. Without this, an approval-gated tool
+  // call from Gaia's Hermes backend would hang the whole turn forever (see
+  // tools/approval.py: a gateway-context approval with no listener blocks
+  // indefinitely).
+  const [pendingApproval, setPendingApproval] = useState(null);
+
+  const handleApprovalRequest = useCallback(({ command, description, choices }) => {
+    return new Promise((resolve) => {
+      setPendingApproval({ command, description, choices, resolve });
+    });
+  }, []);
+
+  const resolveApproval = (choice) => {
+    pendingApproval?.resolve?.(choice);
+    setPendingApproval(null);
+  };
 
   const inputRef = useRef(null);
+  // Stable per-dialog-open id — enables Hermes session continuity (only used
+  // when gaiaHermesEnabled) so the proxy can retrieve reasoning_content
+  // afterward. Regenerated only on a fresh mount, not per message.
+  const gaiaSessionIdRef = useRef(
+    typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `gaia-${Date.now()}`
+  );
   const chatObjectIdRef = useRef(null);
   const exchangeCountRef = useRef(0);
   const resumedIdRef = useRef(null); // avoid re-loading the same object on re-renders
@@ -409,7 +435,9 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
 
       let reply;
       if (tabId === GAIA_TAB) {
-        reply = await AIService.chatWithGaia(chatHistory);
+        reply = await AIService.chatWithGaia(chatHistory, gaiaSessionIdRef.current, {
+          onApprovalRequest: handleApprovalRequest,
+        });
       } else {
         // Direct specialist call
         const tab = tabs.find((t) => t.id === tabId);
@@ -459,6 +487,7 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
   const currentMessages = activeTabData?.messages || [];
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-4xl h-[75vh] flex p-0 overflow-hidden">
 
@@ -631,5 +660,52 @@ export function ChatDialog({ open, onOpenChange, resumeObject }) {
         )}
       </DialogContent>
     </Dialog>
+
+    {/* Hermes approval prompt — Gaia's Hermes backend blocks mid-turn until
+        one of these choices is posted back (see runGaia.js/onApprovalRequest).
+        A true sibling of the chat Dialog (not nested inside it) so it stacks
+        cleanly and survives even if the chat dialog itself were closed. */}
+    <Dialog open={!!pendingApproval} onOpenChange={(next) => { if (!next) resolveApproval("deny"); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Gaia wil iets uitvoeren</DialogTitle>
+          </DialogHeader>
+          {pendingApproval?.description && (
+            <p className="text-sm text-muted-foreground">{pendingApproval.description}</p>
+          )}
+          {pendingApproval?.command && (
+            <pre className="rounded-md bg-muted/60 p-2 text-xs overflow-x-auto whitespace-pre-wrap">
+              {pendingApproval.command}
+            </pre>
+          )}
+          <div className="flex flex-wrap gap-2 pt-2">
+            <button
+              onClick={() => resolveApproval("once")}
+              className="px-3 py-1.5 rounded-md text-sm bg-primary text-primary-foreground hover:opacity-90"
+            >
+              Eenmalig toestaan
+            </button>
+            <button
+              onClick={() => resolveApproval("session")}
+              className="px-3 py-1.5 rounded-md text-sm border border-border hover:bg-muted"
+            >
+              Toestaan voor deze sessie
+            </button>
+            <button
+              onClick={() => resolveApproval("always")}
+              className="px-3 py-1.5 rounded-md text-sm border border-border hover:bg-muted"
+            >
+              Altijd toestaan
+            </button>
+            <button
+              onClick={() => resolveApproval("deny")}
+              className="px-3 py-1.5 rounded-md text-sm border border-destructive/50 text-destructive hover:bg-destructive/10"
+            >
+              Weigeren
+            </button>
+          </div>
+        </DialogContent>
+    </Dialog>
+    </>
   );
 }

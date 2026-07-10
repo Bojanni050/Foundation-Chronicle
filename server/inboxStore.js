@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { contentHash } = require("./contentHash");
 
 // Shared by server/index.js (extension imports) and screenpipeIngest.js
 // (automatic activity capture) — a single read/write path avoids two writers
@@ -27,9 +28,16 @@ function writeInbox(arr) {
 
 function pushToInbox(item) {
   const inbox = readInbox();
-  inbox.push(item);
+  // Skip if an item with the same content hash already sits in the inbox
+  // (prevents the extension from queueing the same chat multiple times)
+  const hash = item.content ? contentHash(item.content) : null;
+  if (hash && inbox.some((existing) => existing.contentHash === hash)) {
+    return item;
+  }
+  const entry = { ...item, contentHash: hash };
+  inbox.push(entry);
   writeInbox(inbox);
-  return item;
+  return entry;
 }
 
 module.exports = { readInbox, writeInbox, pushToInbox };

@@ -1,4 +1,6 @@
-const { spawn, execSync } = require("child_process");
+const { spawn, execSync, exec } = require("child_process");
+const { promisify } = require("util");
+const execAsync = promisify(exec);
 const path = require("path");
 const fs = require("fs");
 
@@ -113,6 +115,56 @@ function isNoisyLine(text) {
   return NOISY_LINE_PATTERNS.some((re) => re.test(text));
 }
 
+// Registers Chronicle's specialists-MCP endpoint with this Hermes instance
+// so Gaia can reach confirmed specialists as tools regardless of which
+// transport (/chat/completions or /v1/runs) a given turn uses. Idempotent:
+// `hermes mcp add` on an already-registered name errors, which is caught and
+// ignored — safe to call on every startup, not just the first.
+//
+// Must be called AFTER Chronicle's own app.listen() is up: `hermes mcp add`
+// immediately tries to connect to the URL to discover tools, so calling this
+// before Chronicle is listening guarantees a ~40s connection-timeout on
+// every single startup. Async (not execSync) for the same reason — this
+// must never block the rest of startup while it waits on that connection
+// attempt or on the interactive auth prompt below.
+async function registerSpecialistsMcp() {
+  const chroniclePort = process.env.CHRONICLE_PORT || 4577;
+  try {
+    const child = execAsync(
+      `hermes mcp add gaia-specialists --url http://127.0.0.1:${chroniclePort}/mcp/specialists`,
+      { env: { ...process.env, HERMES_HOME: GAIA_HERMES_HOME }, shell: true }
+    );
+    // `hermes mcp add` interactively asks "Does this server require
+    // authentication? [Y/n]" before it even attempts to connect. With no TTY
+    // attached that prompt would hang forever waiting for stdin, so answer
+    // it directly on the child's stdin — util.promisify(exec) exposes the
+    // underlying ChildProcess as `.child` on the returned promise.
+    child.child.stdin.write("n\n");
+    child.child.stdin.end();
+    await child;
+    console.log("[Gaia-Hermes] Registered gaia-specialists MCP server.");
+  } catch (err) {
+    const out = (err.stdout || "") + (err.stderr || "");
+    if (/already exists|already configured/i.test(out)) {
+      // Fine — already registered from a previous run.
+    } else {
+      console.error("[Gaia-Hermes] Could not register specialists MCP server:", out.trim() || err.message);
+    }
+  }
+  // MCP-registered toolsets are off by default until explicitly enabled —
+  // same opt-in-by-default pattern as the Discord toolset. Best-effort:
+  // already-enabled is not an error worth surfacing.
+  try {
+    await execAsync(
+      `hermes tools enable gaia-specialists`,
+      { env: { ...process.env, HERMES_HOME: GAIA_HERMES_HOME }, shell: true }
+    );
+  } catch (err) {
+    const out = (err.stdout || "") + (err.stderr || "");
+    console.error("[Gaia-Hermes] Could not enable gaia-specialists toolset:", out.trim() || err.message);
+  }
+}
+
 async function startGaiaHermes() {
   if (gaiaHermesProcess) {
     console.log("[Gaia-Hermes] Already running in this process, skipping start.");
@@ -142,6 +194,13 @@ async function startGaiaHermes() {
     console.log(`[Gaia-Hermes] ${text}`);
     pushLogLine("stdout", text);
   });
+  gaiaHermesProcess.stdout.on("error", (err) => {
+    // Defensive: an EPIPE/write-after-close on the piped stream itself would
+    // otherwise be an uncaught exception on this stream, which crashes the
+    // whole Node process — not just this child. A Hermes crash must never
+    // take Chronicle's own server down with it.
+    console.error("[Gaia-Hermes] stdout stream error (ignored):", err.message);
+  });
 
   gaiaHermesProcess.stderr.on("data", (data) => {
     const msg = data.toString().trim();
@@ -152,6 +211,9 @@ async function startGaiaHermes() {
     if (!msg.includes("already running")) {
       console.error(`[Gaia-Hermes:err] ${msg}`);
     }
+  });
+  gaiaHermesProcess.stderr.on("error", (err) => {
+    console.error("[Gaia-Hermes] stderr stream error (ignored):", err.message);
   });
 
   gaiaHermesProcess.on("exit", (code, signal) => {
@@ -187,4 +249,4 @@ function stopGaiaHermes() {
   clearPid();
 }
 
-module.exports = { startGaiaHermes, stopGaiaHermes, getGaiaHermesConfig, getRecentLogLines, pushLogLine, GAIA_HERMES_PORT };
+module.exports = { startGaiaHermes, stopGaiaHermes, getGaiaHermesConfig, getRecentLogLines, pushLogLine, registerSpecialistsMcp, GAIA_HERMES_PORT };

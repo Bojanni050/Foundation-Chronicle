@@ -2,10 +2,12 @@ import { useRef, useState } from "react";
 import { Upload, Loader2, FileText } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { getSettings } from "@/lib/settings";
 import { objectRepository } from "@/repositories";
 import { parseChat, keywordTags } from "@/services/chatParser";
 import { embedObject } from "@/services/objectEmbedding";
 import { AIService } from "@/services/AIService";
+import { contentHash } from "@/lib/contentHash";
 
 async function autoTags(text) {
   if (AIService.isConfigured()) {
@@ -31,7 +33,35 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
     let created = 0;
     const total = entries.length;
 
-    for (let i = 0; i < total; i++) {
+    // Atomically claim any items queued in the inbox (extension-imported)
+        // and process them as part of this import batch. Using POST /claim
+        // instead of GET prevents the race where inboxSync claims items between
+        // our read and our create loop — the claim is atomic, so exactly one
+        // caller (us or inboxSync) ever gets each item.
+        let inboxEntries = [];
+        try {
+          const { apiUrl } = getSettings();
+          if (apiUrl) {
+            const res = await fetch(`${apiUrl}/api/inbox/claim`, { method: "POST" });
+            if (res.ok) {
+              const inbox = await res.json();
+              if (Array.isArray(inbox)) {
+                inboxEntries = inbox.map((it) => ({
+                  text: it.content || "",
+                  filename: it.title || "Inbox item",
+                  provider: it.sourceProvider || it.source || null,
+                }));
+              }
+            }
+          }
+        } catch { /* local server may be unreachable */ }
+
+        // Combine inbox entries with the user's paste/files so they're all
+        // processed together in one pass
+        const allEntries = [...inboxEntries, ...entries];
+        const totalAll = allEntries.length;
+
+        for (let i = 0; i < totalAll; i++) {
       const { text, filename, provider } = entries[i];
       if (!text.trim()) continue;
 
@@ -42,6 +72,15 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
 
       setStatusText(`[${i + 1}/${total}] Analyzing content and generating tags for ${fileLabel}...`);
       const tags = await autoTags(parsed.content);
+
+      // Skip if an object with the same content hash already exists
+      // in IndexedDB or is queued in the inbox (extension-imported)
+      const hash = contentHash(parsed.content);
+      const existing = await objectRepository.findByContentHash(hash);
+      if (existing || inboxHashes.has(hash)) {
+        created++;
+        continue;
+      }
 
       setStatusText(`[${i + 1}/${total}] Saving ${fileLabel} to your database...`);
       const obj = await objectRepository.create({
