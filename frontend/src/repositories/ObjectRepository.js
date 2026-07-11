@@ -94,7 +94,17 @@ export class IndexedDBObjectRepository extends ObjectRepository {
   async list(filter = {}) {
     const db = await getDB();
     let all = await db.getAll(OBJECT_STORE);
-    if (filter.type && filter.type !== "all") {
+    if (filter.type === "all") {
+      // "Everything" — the general browsing view. Activity objects are
+      // passive, AI-collected context (app-switch/window-focus captures
+      // from the UIA pipeline), not content the user authored, so they get
+      // their own dedicated "Activity" nav item instead of cluttering this
+      // list alongside notes/chats/etc. A bare list() (no `type` at all —
+      // used for object-lookup/relation purposes, not this view) still
+      // returns everything, since e.g. selecting an activity object via its
+      // own nav item needs to be able to find it.
+      all = all.filter((o) => o.type !== "activity");
+    } else if (filter.type && filter.type !== "all") {
       if (filter.type === "untyped") {
         const valid = getValidTypeKeys();
         all = all.filter((o) => !o.type || !valid.has(o.type));
@@ -167,10 +177,15 @@ export class IndexedDBObjectRepository extends ObjectRepository {
   async counts() {
     const all = await this.list();
     const valid = getValidTypeKeys();
-    const counts = { all: all.length, untyped: 0 };
+    // "all" mirrors what the "Everything" view actually shows (see list()) —
+    // activity objects are still tallied under their own `activity` key so
+    // the dedicated nav item's badge stays correct, just not folded into
+    // the general total.
+    const counts = { all: 0, untyped: 0 };
     for (const o of all) {
       if (!o.type || !valid.has(o.type)) counts.untyped += 1;
       else counts[o.type] = (counts[o.type] || 0) + 1;
+      if (o.type !== "activity") counts.all += 1;
     }
     return counts;
   }

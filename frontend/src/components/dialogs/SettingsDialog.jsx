@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, Check, X, Copy, Eye, EyeOff, RefreshCw } from "lucide-react";
+import { Loader2, Check, X, Copy, Eye, EyeOff, RefreshCw, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getSettings, saveSettings, AI_FUNCTIONS } from "@/lib/settings";
 import { AIService } from "@/services/AIService";
@@ -9,6 +9,7 @@ import { objectRepository } from "@/repositories";
 import { getDB, OBJECT_STORE } from "@/lib/db";
 import { invokeTauri } from "@/lib/tauri";
 import { startUiaCaptureListener, stopUiaCaptureListener } from "@/services/uiaCapture";
+import { relTime } from "@/lib/format";
 
 function Field({ label, children, hint }) {
   return (
@@ -39,6 +40,10 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [hermesSkillsLoading, setHermesSkillsLoading] = useState(false);
   const [hermesSkillsSaving, setHermesSkillsSaving] = useState("");
   const [hermesSkillsError, setHermesSkillsError] = useState("");
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityObjects, setActivityObjects] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityDeletingId, setActivityDeletingId] = useState("");
 
   const handleSeed = async () => {
     setSeedBusy(true);
@@ -189,6 +194,36 @@ export function SettingsDialog({ open, onOpenChange }) {
       // updates the include-text flag on the live capture thread in place.
       invokeTauri("start_uia_capture", { includeText: enabled });
     }
+  };
+
+  // Activity objects don't get their own browsable nav item (see Sidebar.jsx) —
+  // they're passive AI-collected context, not content the user authored — but
+  // given this is a privacy-sensitive capture (window text, redacted passwords
+  // aside), the user still needs somewhere to review and delete what's been
+  // captured. This is that somewhere.
+  const toggleActivityViewer = async () => {
+    const next = !activityOpen;
+    setActivityOpen(next);
+    if (next && activityObjects.length === 0) {
+      setActivityLoading(true);
+      try {
+        const list = await objectRepository.list({ type: "activity" });
+        setActivityObjects(list);
+      } finally {
+        setActivityLoading(false);
+      }
+    }
+  };
+
+  const deleteActivityObject = async (id) => {
+    setActivityDeletingId(id);
+    try {
+      await objectRepository.delete(id);
+      setActivityObjects((prev) => prev.filter((o) => o.id !== id));
+    } catch (err) {
+      toast.error(`Couldn't delete: ${err.message}`);
+    }
+    setActivityDeletingId("");
   };
 
   const saveGgufPath = async () => {
@@ -376,6 +411,60 @@ export function SettingsDialog({ open, onOpenChange }) {
                 (e.g. an address bar, a text editor's content). Anything shaped like a password (a token with
                 mixed case, digits, and symbols) is redacted before it ever leaves the capture module.
               </p>
+            </div>
+
+            <div className="pt-1">
+              <button
+                onClick={toggleActivityViewer}
+                data-testid="activity-viewer-toggle"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-ink transition-colors"
+              >
+                {activityOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                {activityOpen ? "Hide" : "Review"} captured activity
+              </button>
+
+              {activityOpen && (
+                <div className="mt-2 max-h-60 overflow-y-auto rounded-lg border border-border no-scrollbar" data-testid="activity-viewer-list">
+                  {activityLoading ? (
+                    <div className="flex items-center justify-center py-6">
+                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : activityObjects.length === 0 ? (
+                    <p className="px-3 py-4 text-xs text-muted-foreground">Nothing captured yet.</p>
+                  ) : (
+                    <div className="divide-y divide-border">
+                      {activityObjects.map((o) => (
+                        <div key={o.id} className="flex items-start justify-between gap-2 px-3 py-2" data-testid={`activity-item-${o.id}`}>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-sm text-ink">{o.title || (o.tags || [])[0] || "Untitled"}</p>
+                              <span className="shrink-0 text-[11px] text-muted-foreground/70">{relTime(o.updatedAt)}</span>
+                            </div>
+                            {o.content && (
+                              <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                                {o.content.replace(/\s+/g, " ").trim()}
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => deleteActivityObject(o.id)}
+                            disabled={activityDeletingId === o.id}
+                            data-testid={`activity-delete-${o.id}`}
+                            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40 transition-colors"
+                            aria-label="Delete captured entry"
+                          >
+                            {activityDeletingId === o.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </section>
 

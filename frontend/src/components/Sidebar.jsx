@@ -107,7 +107,7 @@ export function Sidebar({
                 Quick note
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              {OBJECT_TYPES.filter((t) => t.key !== "chat").map((t) => (
+              {OBJECT_TYPES.filter((t) => t.key !== "chat" && t.key !== "activity").map((t) => (
                 <DropdownMenuItem
                   key={t.key}
                   data-testid={`new-menu-${t.key}`}
@@ -168,7 +168,10 @@ export function Sidebar({
       </p>
 
       <nav className="flex-1 overflow-y-auto px-3 no-scrollbar">
-        {OBJECT_TYPES.map((t) => (
+        {/* "activity" is deliberately excluded here — it's passive, AI-collected
+            context (app/window capture from the UIA pipeline), not content the
+            user browses like notes/chats/etc. It's still viewable from Settings. */}
+        {OBJECT_TYPES.filter((t) => t.key !== "activity").map((t) => (
           <NavRow
             key={t.key}
             icon={t.icon}
