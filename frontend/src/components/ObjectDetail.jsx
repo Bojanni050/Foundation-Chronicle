@@ -25,7 +25,34 @@ const MARKDOWN_COMPONENTS = {
   h1: (p) => <h1 className="font-serif text-2xl text-ink mt-5 mb-2 first:mt-0" {...p} />,
   h2: (p) => <h2 className="font-serif text-xl text-ink mt-4 mb-2 first:mt-0" {...p} />,
   h3: (p) => <h3 className="font-serif text-lg text-ink mt-3 mb-1.5 first:mt-0" {...p} />,
-  p: (p) => <p className="mb-3 last:mb-0 leading-relaxed" {...p} />,
+  p: ({ children, ...props }) => {
+    const childArray = Array.isArray(children) ? children : [children];
+    const firstChild = childArray[0];
+    
+    if (typeof firstChild === 'string') {
+      const match = firstChild.match(/^(H|A):\s(.*)/s);
+      if (match) {
+        const isHuman = match[1] === 'H';
+        const newChildren = [match[2], ...childArray.slice(1)];
+        
+        return (
+          <div className={`mb-4 flex w-full ${isHuman ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[90%] sm:max-w-[85%] rounded-2xl px-4 py-3 ${
+              isHuman 
+                ? 'bg-primary/10 text-ink font-medium' 
+                : 'bg-accent/40 text-ink font-normal'
+            }`}>
+              <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isHuman ? 'text-primary/80' : 'text-muted-foreground/70'}`}>
+                {isHuman ? 'Ik' : 'AI'}
+              </div>
+              <div className="leading-relaxed break-words whitespace-pre-wrap">{newChildren}</div>
+            </div>
+          </div>
+        );
+      }
+    }
+    return <p className="mb-3 last:mb-0 leading-relaxed" {...props}>{children}</p>;
+  },
   ul: (p) => <ul className="mb-3 ml-5 list-disc space-y-1" {...p} />,
   ol: (p) => <ol className="mb-3 ml-5 list-decimal space-y-1" {...p} />,
   li: (p) => <li {...p} />,
