@@ -87,7 +87,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
   const [aiNote, setAiNote] = useState("");
   const [locked, setLocked] = useState(!!object.locked);
   const [lockBusy, setLockBusy] = useState(false);
-  const [preview, setPreview] = useState(false);
+  const [preview, setPreview] = useState(!!(object.title || object.content));
   const timer = useRef(null);
   const idRef = useRef(object.id);
   const pending = useRef({});
@@ -112,10 +112,11 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
     setSaveState("saved");
     setAiNote("");
     setLocked(!!object.locked);
-    setPreview(false);
+    const isNew = !object.title && !object.content;
+    setPreview(!isNew);
     // content-first capture: a fresh, empty entry drops the cursor straight
     // into the writing surface — no type to pick first.
-    if (!object.title && !object.content) {
+    if (isNew) {
       requestAnimationFrame(() => titleRef.current?.focus());
     }
   }, [object.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -194,7 +195,15 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
         value={title}
         onChange={(e) => change("title", e.target.value, setTitle)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") { e.preventDefault(); contentAreaRef.current?.focus(); }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (preview) {
+              setPreview(false);
+              requestAnimationFrame(() => contentAreaRef.current?.focus());
+            } else {
+              contentAreaRef.current?.focus();
+            }
+          }
         }}
         placeholder="Untitled"
         disabled={locked}
