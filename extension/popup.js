@@ -93,7 +93,6 @@ async function scrapeConversation(provider) {
       const text = nodeToMarkdown(el);
       if (text) localTurns.push({ role, text });
     };
-    let messageNodes = null;
     if (providerName === "claude") {
       const nodes = leavesOnly(document.querySelectorAll('[data-testid="user-message"], .font-claude-message'));
       nodes.forEach((n) => {
@@ -105,8 +104,7 @@ async function scrapeConversation(provider) {
         leavesOnly(document.querySelectorAll('.font-claude-message')).forEach((n) => push("assistant", n));
       }
     } else if (providerName === "chatgpt") {
-      messageNodes = Array.from(document.querySelectorAll('[data-message-author-role]'));
-      messageNodes.forEach((n) => {
+      document.querySelectorAll('[data-message-author-role]').forEach((n) => {
         const role = n.getAttribute("data-message-author-role") === "assistant" ? "assistant" : "user";
         push(role, n);
       });
@@ -118,22 +116,23 @@ async function scrapeConversation(provider) {
         document.querySelectorAll('[class*="conversation"] [class*="text"]').forEach((n) => push("user", n));
       }
     }
-    return { turns: localTurns, messageNodes };
+    return { turns: localTurns };
   };
 
-  // Snapshot at whatever scroll position the chat was already at (normally
-  // the bottom / most recent messages) before any auto-scrolling below moves
-  // it — that's the best position for reading ChatGPT's relative-date
-  // tooltip, since it's about the most recent exchange.
-  const initialSnapshot = snapshotTurns(provider);
-  const chatgptMessageNodes = provider === "chatgpt" ? initialSnapshot.messageNodes : null;
+  // ChatGPT groups turns with a date-separator row between them —
+  // <div role="separator" aria-label="zaterdag 14:15">, statically in the
+  // DOM (not a hover-only tooltip, no simulated hover needed). Turn that
+  // label into an absolute ISO timestamp; collectAllTurns below tracks the
+  // *last* one seen while walking top -> bottom, since that's the group
+  // closest to the most recent message — the best proxy for "when did this
+  // exchange happen".
+  const getLastSeparatorLabel = () => {
+    const labels = Array.from(document.querySelectorAll('[role="separator"][aria-label]'))
+      .map((el) => el.getAttribute("aria-label"))
+      .filter(Boolean);
+    return labels.length ? labels[labels.length - 1] : null;
+  };
 
-  // ChatGPT doesn't expose a real <time> element in the conversation view —
-  // instead each message has a hover-only tooltip showing a relative label
-  // ("Vandaag 16:05", "Gisteren 16:05", or a weekday name like "maandag
-  // 16:05" for the past week, full dates beyond that). Turn one of those
-  // labels into an absolute ISO timestamp, newest message first since that's
-  // the best proxy for "when did this exchange happen".
   const parseRelativeDateLabel = (label, now = new Date()) => {
     if (!label) return null;
     const text = label.trim().toLowerCase();
@@ -182,49 +181,11 @@ async function scrapeConversation(provider) {
     return isNaN(native.getTime()) ? null : native;
   };
 
-  let occurredAt = null;
-  try {
-    if (chatgptMessageNodes && chatgptMessageNodes.length) {
-      // Best-effort: ChatGPT's timestamp is usually only rendered on hover
-      // (a portal-based tooltip), so it may not be in the DOM at all for a
-      // one-shot scrape. This checks for the label wherever ChatGPT happens
-      // to expose it statically (title/aria-label near a message, or an
-      // already-open tooltip) without simulating a hover.
-      const RELATIVE_RE = /^(vandaag|gisteren|today|yesterday|zondag|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i;
-      const candidateContainers = [...chatgptMessageNodes].reverse()
-        .map((n) => n.closest("article") || n.parentElement || n);
-      candidateContainers.push(document.body); // last resort: an open tooltip anywhere on the page
-      outer: for (const container of candidateContainers) {
-        const labelEls = container.querySelectorAll('[title], [aria-label], [role="tooltip"]');
-        for (const el of labelEls) {
-          const raw = el.getAttribute("title") || el.getAttribute("aria-label") || el.textContent;
-          const val = raw && raw.trim();
-          if (val && (RELATIVE_RE.test(val) || /\d{1,2}:\d{2}/.test(val))) {
-            const parsed = parseRelativeDateLabel(val);
-            if (parsed) { occurredAt = parsed.toISOString(); break outer; }
-          }
-        }
-      }
-    }
-    if (!occurredAt) {
-      const timeEl = document.querySelector('time, [class*="timestamp"], [class*="time"]');
-      if (timeEl) {
-        const dt = timeEl.getAttribute('datetime') || timeEl.getAttribute('title') || timeEl.innerText;
-        if (dt && dt.trim()) {
-          const parsedDate = new Date(dt.trim());
-          if (!isNaN(parsedDate.getTime())) {
-            occurredAt = parsedDate.toISOString();
-          }
-        }
-      }
-    }
-  } catch (err) {
-    // ignore
-  }
-
   // Walk the whole conversation to collect every turn, not just whatever
   // was mounted when the popup opened. Merges by content so re-mounted
-  // duplicates from virtualization collapse into one.
+  // duplicates from virtualization collapse into one. Also tracks the last
+  // ChatGPT date-separator label seen along the way, for occurredAt below.
+  let lastDateLabel = provider === "chatgpt" ? getLastSeparatorLabel() : null;
   const collectAllTurns = async () => {
     const seenKeys = new Set();
     const merged = [];
@@ -235,6 +196,10 @@ async function scrapeConversation(provider) {
           seenKeys.add(key);
           merged.push(t);
         }
+      }
+      if (provider === "chatgpt") {
+        const label = getLastSeparatorLabel();
+        if (label) lastDateLabel = label; // later snapshots are further down -> more recent
       }
     };
     // Deliberately NOT seeded from initialSnapshot: that snapshot is taken
@@ -301,6 +266,25 @@ async function scrapeConversation(provider) {
 
   const turns = await collectAllTurns();
   const title = document.title || "";
+  let occurredAt = null;
+  if (lastDateLabel) {
+    const parsed = parseRelativeDateLabel(lastDateLabel);
+    if (parsed) occurredAt = parsed.toISOString();
+  }
+  if (!occurredAt) {
+    // Generic fallback for providers without their own extraction above
+    // (e.g. Claude, which may render a real <time datetime="..."> element).
+    try {
+      const timeEl = document.querySelector("time, [class*='timestamp'], [class*='time']");
+      const dt = timeEl && (timeEl.getAttribute("datetime") || timeEl.getAttribute("title") || timeEl.innerText);
+      if (dt && dt.trim()) {
+        const parsedDate = new Date(dt.trim());
+        if (!isNaN(parsedDate.getTime())) occurredAt = parsedDate.toISOString();
+      }
+    } catch {
+      // ignore
+    }
+  }
   return { turns, title, url: location.href, occurredAt };
 }
 

@@ -145,33 +145,22 @@ def collect_conversation_links(page, limit=None):
     return items[:limit] if limit else items
 
 
-def extract_occurred_at(page):
-    """Hovers the last message to reveal ChatGPT's relative-timestamp
-    tooltip and parses it. This is a *real* hover (Playwright drives an
-    actual browser), unlike the browser extension which can only guess at
-    a static DOM attribute — so this is the more reliable of the two."""
+def get_last_separator_label(page):
+    """ChatGPT groups turns with a date-separator row between them —
+    <div role="separator" aria-label="zaterdag 14:15"> — statically in the
+    DOM, not a hover-only tooltip (confirmed from a real logged-in session's
+    devtools; no hover simulation needed, unlike the earlier guess this
+    replaced). Returns the last one currently mounted, i.e. the group
+    closest to whatever's rendered right now."""
     try:
-        messages = page.query_selector_all("[data-message-author-role]")
-        if not messages:
-            return None
-        last = messages[-1]
-        last.scroll_into_view_if_needed()
-        last.hover()
-        page.wait_for_timeout(300)
-        label = None
-        tooltip = page.query_selector('[role="tooltip"]')
-        if tooltip:
-            label = tooltip.inner_text()
-        if not label:
-            for el in last.query_selector_all("[title], [aria-label]"):
-                val = el.get_attribute("title") or el.get_attribute("aria-label")
-                if val and re.search(r"\d{1,2}:\d{2}", val):
-                    label = val
-                    break
-        if not label:
-            return None
-        dt = parse_relative_date_label(label)
-        return dt.isoformat() if dt else None
+        return page.evaluate(
+            """() => {
+                const labels = Array.from(document.querySelectorAll('[role="separator"][aria-label]'))
+                    .map(el => el.getAttribute('aria-label'))
+                    .filter(Boolean);
+                return labels.length ? labels[labels.length - 1] : null;
+            }"""
+        )
     except Exception:
         return None
 
@@ -183,7 +172,13 @@ def collect_turns(page):
     off-screen messages), same fix (walk top to bottom, merge by content,
     terminate purely on reaching the bottom — never on "no new turns this
     round", since one long message can span several steps with nothing new
-    to report in between)."""
+    to report in between). Also tracks the last date-separator label seen
+    along the way (see get_last_separator_label) — later snapshots are
+    further down the conversation, so the last one found is the most
+    recent, best proxy for "when did this exchange happen".
+
+    Returns (turns, last_date_label).
+    """
     handle = page.evaluate_handle(
         """() => {
             const anyMsg = document.querySelector('[data-message-author-role]');
@@ -218,13 +213,18 @@ def collect_turns(page):
 
     seen = set()
     merged = []
+    last_date_label = get_last_separator_label(page)
 
     def merge_in(items):
+        nonlocal last_date_label
         for item in items:
             key = item["role"] + "::" + item["html"]
             if key not in seen:
                 seen.add(key)
                 merged.append(item)
+        label = get_last_separator_label(page)
+        if label:
+            last_date_label = label
 
     page.evaluate("(el) => { el.scrollTop = 0; }", handle)
     page.wait_for_timeout(200)
@@ -249,7 +249,7 @@ def collect_turns(page):
         text = md(item["html"], heading_style="ATX", bullets="-").strip()
         if text:
             turns.append({"role": item["role"], "text": text})
-    return turns
+    return turns, last_date_label
 
 
 def format_turns(turns):
@@ -264,11 +264,15 @@ def import_conversation(page, url, title_hint, api_url, token):
         print(f"  ! no messages found, skipping: {url}")
         return False
 
-    occurred_at = extract_occurred_at(page)
-    turns = collect_turns(page)
+    turns, last_date_label = collect_turns(page)
     if not turns:
         print(f"  ! no turns extracted, skipping: {url}")
         return False
+
+    occurred_at = None
+    if last_date_label:
+        dt = parse_relative_date_label(last_date_label)
+        occurred_at = dt.isoformat() if dt else None
 
     content = format_turns(turns)
     title = next((t["text"][:80] for t in turns if t["role"] == "user"), title_hint or page.title())
