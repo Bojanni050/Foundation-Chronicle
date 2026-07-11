@@ -339,7 +339,19 @@ def main():
         page = context.pages[0] if context.pages else context.new_page()
         page.goto("https://chatgpt.com/", wait_until="domcontentloaded")
 
-        if page.query_selector('a[href^="/c/"]') is None:
+        def is_logged_in():
+            # The login flow itself is several navigations (chatgpt.com ->
+            # Google/email login -> back to chatgpt.com), and any of these
+            # checks can land mid-navigation, when Playwright's execution
+            # context for the page has been torn down and not yet replaced.
+            # That's expected and transient here, not a real failure — treat
+            # it as "not ready yet" rather than letting it crash the script.
+            try:
+                return page.query_selector('a[href^="/c/"]') is not None
+            except Exception:
+                return False
+
+        if not is_logged_in():
             # Polls for login instead of blocking on input() — this script
             # can be spawned without a TTY attached (e.g. started from
             # Chronicle's own backend), where nothing could ever answer a
@@ -349,8 +361,11 @@ def main():
             print("If Google blocks 'Continue with Google' as an unsafe browser, use email+password login instead.")
             logged_in = False
             for _ in range(600):  # up to 20 minutes
-                page.wait_for_timeout(2000)
-                if page.query_selector('a[href^="/c/"]') is not None:
+                try:
+                    page.wait_for_timeout(2000)
+                except Exception:
+                    pass  # also transient during navigation — keep polling
+                if is_logged_in():
                     logged_in = True
                     break
             if not logged_in:
