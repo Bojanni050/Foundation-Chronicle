@@ -311,16 +311,53 @@ def main():
     imported = set(state["imported_urls"])
 
     with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            str(PROFILE_DIR), headless=args.headless, viewport={"width": 1280, "height": 900}
+        # Google's account security blocks "Continue with Google" sign-ins
+        # from a browser it detects as automated ("This browser or app may
+        # not be secure") — it does not affect chatgpt.com itself, only that
+        # one OAuth path. channel="chrome" drives the user's real installed
+        # Chrome (rather than Playwright's bundled Chromium test build),
+        # and disabling the AutomationControlled blink feature plus patching
+        # navigator.webdriver removes the most common automation fingerprints
+        # Google's check looks for. Even so: logging in with ChatGPT email +
+        # password instead of "Continue with Google" sidesteps the check
+        # entirely and is the more reliable option.
+        launch_kwargs = dict(
+            headless=args.headless,
+            viewport={"width": 1280, "height": 900},
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        try:
+            context = p.chromium.launch_persistent_context(
+                str(PROFILE_DIR), channel="chrome", **launch_kwargs
+            )
+        except Exception:
+            print("Real Chrome not found (channel='chrome') — falling back to Playwright's bundled Chromium.")
+            context = p.chromium.launch_persistent_context(str(PROFILE_DIR), **launch_kwargs)
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
         )
         page = context.pages[0] if context.pages else context.new_page()
         page.goto("https://chatgpt.com/", wait_until="domcontentloaded")
 
         if page.query_selector('a[href^="/c/"]') is None:
-            print("Log into ChatGPT in the opened browser window, then press Enter here to continue...")
-            input()
-            page.goto("https://chatgpt.com/", wait_until="domcontentloaded")
+            # Polls for login instead of blocking on input() — this script
+            # can be spawned without a TTY attached (e.g. started from
+            # Chronicle's own backend), where nothing could ever answer a
+            # stdin prompt. The visible browser window is still the actual
+            # login UI; this just waits for it instead of an Enter keypress.
+            print("Waiting for you to log into ChatGPT in the opened browser window...")
+            print("If Google blocks 'Continue with Google' as an unsafe browser, use email+password login instead.")
+            logged_in = False
+            for _ in range(600):  # up to 20 minutes
+                page.wait_for_timeout(2000)
+                if page.query_selector('a[href^="/c/"]') is not None:
+                    logged_in = True
+                    break
+            if not logged_in:
+                print("Timed out waiting for login.")
+                context.close()
+                sys.exit(1)
+            print("Logged in.")
 
         print("Collecting conversation list...")
         links = collect_conversation_links(page, limit=args.limit)

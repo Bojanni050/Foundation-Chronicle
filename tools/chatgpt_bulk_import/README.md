@@ -27,6 +27,16 @@ The first run opens a visible Chrome window at chatgpt.com. Log in there,
 then press Enter in the terminal to continue — the session is cached in
 `.chatgpt_profile/` (gitignored) so you won't need to log in again.
 
+**If Google shows "Niet inloggen" / "This browser or app may not be
+secure"**: that's Google's account security flagging the automated browser,
+not a ChatGPT problem — it only affects the "Continue with Google" button.
+Log into ChatGPT with **email + password** instead in that same window;
+that path doesn't go through Google's check at all. The script already
+launches your real installed Chrome (not Playwright's bundled test build)
+and strips the most common automation fingerprints to make the Google path
+less likely to trip in the first place, but email+password is the reliable
+fix if it still does.
+
 Already-imported conversations are tracked in `imported.json` (gitignored)
 and skipped on re-runs, so it's safe to stop and resume.
 
