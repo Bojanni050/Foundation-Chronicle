@@ -186,7 +186,7 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg relative overflow-hidden" data-testid="import-dialog">
+      <DialogContent className="max-w-lg overflow-hidden" data-testid="import-dialog">
         {busy && (
           <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background/95 backdrop-blur-sm p-6">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
