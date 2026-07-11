@@ -18,10 +18,14 @@ function readSkillDescription(skillDir) {
   for (const filename of ["SKILL.md", "skill.md"]) {
     try {
       const text = fs.readFileSync(path.join(skillDir, filename), "utf8");
+      const match = text.match(/^description:\s*(.*)$/m);
+      if (match) {
+        return match[1].replace(/^["']|["']$/g, "").trim().slice(0, 240);
+      }
       const description = text
         .split(/\r?\n/)
         .map((line) => line.trim())
-        .find((line) => line && !line.startsWith("#") && !line.startsWith("---"));
+        .find((line) => line && !line.startsWith("#") && !line.startsWith("---") && !line.startsWith("name:"));
       if (description) return description.slice(0, 240);
     } catch {
       // Try the next conventional entrypoint.
