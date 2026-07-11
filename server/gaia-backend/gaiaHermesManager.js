@@ -30,28 +30,67 @@ function clearPid() {
   try { fs.unlinkSync(PID_FILE); } catch { /* already gone */ }
 }
 
-// Kill any stale Hermes gateway that is still occupying the port.
-// On Windows we use taskkill on the saved PID (and its entire process tree)
-// before attempting a fresh start.
+// Kill whatever process actually holds GAIA_HERMES_PORT. The PID we track in
+// PID_FILE is unreliable: on Windows we spawn with shell:true (needed to
+// resolve "hermes" from PATH), so the tracked PID is cmd.exe's, and the real
+// long-lived gateway (a python.exe process launched underneath hermes.exe)
+// survives independently once its shell/launcher wrapper exits. Killing the
+// tracked PID alone leaves that orphan bound to the port, which then makes
+// every subsequent "hermes gateway run --replace" fail with an "already
+// running" conflict forever — an infinite 3s restart loop. Killing by port
+// is the only thing that reliably frees it.
+function killProcessOnPort(port) {
+  try {
+    if (process.platform === "win32") {
+      const out = execSync(`netstat -ano -p TCP`, { encoding: "utf8" });
+      const pids = new Set();
+      for (const line of out.split("\n")) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 5) continue;
+        const [, localAddr, , state, pid] = parts;
+        if (state !== "LISTENING") continue;
+        if (!localAddr.endsWith(`:${port}`)) continue;
+        if (pid && !isNaN(parseInt(pid, 10))) pids.add(pid);
+      }
+      for (const pid of pids) {
+        console.log(`[Gaia-Hermes] Killing orphaned process on port ${port} (PID ${pid})...`);
+        try { execSync(`taskkill /pid ${pid} /f /t`, { stdio: "ignore" }); } catch { /* already gone */ }
+      }
+    } else {
+      const out = execSync(`lsof -ti tcp:${port}`, { encoding: "utf8" }).trim();
+      for (const pid of out.split("\n").filter(Boolean)) {
+        console.log(`[Gaia-Hermes] Killing orphaned process on port ${port} (PID ${pid})...`);
+        try { process.kill(parseInt(pid, 10), "SIGKILL"); } catch { /* already gone */ }
+      }
+    }
+  } catch {
+    // No process found on the port (netstat/lsof exit non-zero) — nothing to clean up.
+  }
+}
+
+// Kill any stale Hermes gateway that is still occupying the port, whether or
+// not it's the process we happened to track in PID_FILE.
 function killStalePid() {
   let pid = null;
   try {
     pid = parseInt(fs.readFileSync(PID_FILE, "utf8").trim(), 10);
-  } catch { return; } // no PID file — nothing to clean up
+  } catch { /* no PID file — fine, still check the port below */ }
 
-  if (!pid || isNaN(pid)) { clearPid(); return; }
-
-  console.log(`[Gaia-Hermes] Killing stale gateway process (PID ${pid})...`);
-  try {
-    if (process.platform === "win32") {
-      execSync(`taskkill /pid ${pid} /f /t`, { stdio: "ignore" });
-    } else {
-      process.kill(pid, "SIGTERM");
+  if (pid && !isNaN(pid)) {
+    console.log(`[Gaia-Hermes] Killing tracked gateway process (PID ${pid})...`);
+    try {
+      if (process.platform === "win32") {
+        execSync(`taskkill /pid ${pid} /f /t`, { stdio: "ignore" });
+      } else {
+        process.kill(pid, "SIGTERM");
+      }
+    } catch {
+      // Process already gone — that's fine.
     }
-  } catch {
-    // Process already gone — that's fine.
   }
   clearPid();
+
+  killProcessOnPort(GAIA_HERMES_PORT);
 
   // Give the OS a moment to release the port before we spawn the new one.
   return new Promise((resolve) => setTimeout(resolve, 600));
