@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Bot, Check, Loader2, Sparkles, X } from "lucide-react";
+import { Bot, Check, Loader2, Plus, Sparkles, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AIService } from "@/services/AIService";
 import { AI_FUNCTIONS } from "@/lib/settings";
 import {
   confirmSpecialist,
+  createManualSpecialist,
   detectSpecialisten,
   getSpecialistState,
   rejectSpecialist,
@@ -15,6 +16,7 @@ export function SpecialistDialog({ open, onOpenChange }) {
   const [state, setState] = useState(null); // { specialisten } | null
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
+  const [manualTopic, setManualTopic] = useState("");
 
   const load = async () => setState(await getSpecialistState());
 
@@ -43,6 +45,25 @@ export function SpecialistDialog({ open, onOpenChange }) {
       await confirmSpecialist(row);
     } catch (err) {
       setNote(`Couldn't generate a system prompt: ${err.message}`);
+    }
+    setBusy(false);
+    await load();
+  };
+
+  const createManual = async () => {
+    const topic = manualTopic.trim();
+    if (!topic) return;
+    if (!AIService.isConfigured()) {
+      setNote("Add an OpenRouter key in Settings first — needed to write the specialist's system prompt.");
+      return;
+    }
+    setNote("");
+    setBusy(true);
+    try {
+      await createManualSpecialist(topic);
+      setManualTopic("");
+    } catch (err) {
+      setNote(`Couldn't create specialist: ${err.message}`);
     }
     setBusy(false);
     await load();
@@ -81,6 +102,27 @@ export function SpecialistDialog({ open, onOpenChange }) {
         </DialogHeader>
 
         <div className="space-y-4 pt-1 max-h-[60vh] overflow-y-auto no-scrollbar">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={manualTopic}
+              onChange={(e) => setManualTopic(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && createManual()}
+              placeholder="Add a specialist by name (e.g. WordPress)"
+              data-testid="manual-specialist-input"
+              className="flex-1 rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+            />
+            <button
+              onClick={createManual}
+              disabled={busy || !manualTopic.trim()}
+              data-testid="manual-specialist-create-btn"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-sm font-medium text-background hover:bg-ink/90 disabled:opacity-40 transition-colors"
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Add
+            </button>
+          </div>
+
           {state === null ? (
             <p className="text-sm text-muted-foreground">
               Can't reach the local server — run <code>npm run server</code> to use Specialists.

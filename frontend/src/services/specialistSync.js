@@ -74,6 +74,26 @@ export async function confirmSpecialist(specialistRow) {
   return res.json();
 }
 
+/**
+ * Manually create a specialist for a topic the owner names directly,
+ * bypassing the usage-recurrence detection in detectSpecialisten(). Still
+ * evidence-backed (a small note records why it exists) and still goes
+ * through the same AI-authored confirm step as a detected candidate —
+ * the only thing skipped is waiting for the pattern to recur on its own.
+ */
+export async function createManualSpecialist(onderwerp) {
+  const { apiUrl } = getSettings();
+  if (!apiUrl) throw new Error("SPECIALIST_API_ERROR");
+  const evidence = await objectRepository.create({
+    type: "note",
+    title: `Specialist requested: ${onderwerp}`,
+    content: "Added directly via AI Specialists, not detected from recurring activity.",
+    tags: [onderwerp],
+  });
+  const row = await createOrReinforce(apiUrl, onderwerp, evidence.id);
+  return confirmSpecialist(row);
+}
+
 export async function rejectSpecialist(id) {
   const { apiUrl } = getSettings();
   const res = await fetch(`${apiUrl}/api/specialist/${id}/verwerpen`, { method: "PATCH" });
