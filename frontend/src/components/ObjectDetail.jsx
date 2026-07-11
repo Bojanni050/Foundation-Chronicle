@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare, Lock, Unlock } from "lucide-react";
+import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare, Lock, Unlock, Eye, Pencil } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { objectRepository } from "@/repositories";
 import { AIService, keywordTags } from "@/services/AIService";
 import { typeMeta } from "@/lib/objectTypes";
@@ -15,6 +17,42 @@ import {
 } from "@/components/ui/select";
 
 const PROVIDER_LABEL = { claude: "Claude", chatgpt: "ChatGPT", gemini: "Gemini" };
+
+// Matches the app's own tokens (ink/primary/accent/border) rather than a
+// generic typography plugin, so rendered markdown looks native to Chronicle
+// instead of like a foreign "prose" block.
+const MARKDOWN_COMPONENTS = {
+  h1: (p) => <h1 className="font-serif text-2xl text-ink mt-5 mb-2 first:mt-0" {...p} />,
+  h2: (p) => <h2 className="font-serif text-xl text-ink mt-4 mb-2 first:mt-0" {...p} />,
+  h3: (p) => <h3 className="font-serif text-lg text-ink mt-3 mb-1.5 first:mt-0" {...p} />,
+  p: (p) => <p className="mb-3 last:mb-0 leading-relaxed" {...p} />,
+  ul: (p) => <ul className="mb-3 ml-5 list-disc space-y-1" {...p} />,
+  ol: (p) => <ol className="mb-3 ml-5 list-decimal space-y-1" {...p} />,
+  li: (p) => <li {...p} />,
+  a: (p) => <a className="text-primary underline underline-offset-2 hover:text-primary/80" target="_blank" rel="noreferrer" {...p} />,
+  strong: (p) => <strong className="font-semibold text-ink" {...p} />,
+  blockquote: (p) => <blockquote className="mb-3 border-l-2 border-border pl-3 italic text-muted-foreground" {...p} />,
+  hr: (p) => <hr className="my-4 border-border" {...p} />,
+  table: (p) => <table className="mb-3 w-full border-collapse text-sm" {...p} />,
+  th: (p) => <th className="border border-border px-2 py-1 text-left font-semibold" {...p} />,
+  td: (p) => <td className="border border-border px-2 py-1" {...p} />,
+  // react-markdown always wraps block code in <pre><code>; take over pre so
+  // code can decide block vs. inline itself (a single component, one box —
+  // no double <pre> nesting) using "does it contain a newline" as the
+  // heuristic, since plain ``` fences (no language tag) carry no className.
+  pre: ({ children }) => <>{children}</>,
+  code: ({ children }) => {
+    const text = String(children).replace(/\n$/, "");
+    if (text.includes("\n")) {
+      return (
+        <pre className="mb-3 overflow-x-auto rounded-lg bg-accent/40 p-3 text-[0.85em] text-ink">
+          <code>{text}</code>
+        </pre>
+      );
+    }
+    return <code className="rounded bg-accent px-1 py-0.5 text-[0.85em] text-ink">{text}</code>;
+  },
+};
 
 function formatForInput(iso) {
   if (!iso) return "";
@@ -49,6 +87,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
   const [aiNote, setAiNote] = useState("");
   const [locked, setLocked] = useState(!!object.locked);
   const [lockBusy, setLockBusy] = useState(false);
+  const [preview, setPreview] = useState(false);
   const timer = useRef(null);
   const idRef = useRef(object.id);
   const pending = useRef({});
@@ -73,6 +112,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
     setSaveState("saved");
     setAiNote("");
     setLocked(!!object.locked);
+    setPreview(false);
     // content-first capture: a fresh, empty entry drops the cursor straight
     // into the writing surface — no type to pick first.
     if (!object.title && !object.content) {
@@ -161,15 +201,42 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
         className="w-full shrink-0 bg-transparent font-serif text-4xl leading-tight text-ink placeholder:text-muted-foreground/30 focus:outline-none disabled:opacity-70 disabled:cursor-not-allowed"
       />
 
-      <textarea
-        ref={contentAreaRef}
-        data-testid="detail-content-input"
-        value={content}
-        onChange={(e) => change("content", e.target.value, setContent)}
-        placeholder="Start writing…"
-        disabled={locked}
-        className="mt-4 flex-1 w-full resize-none bg-transparent text-base leading-relaxed text-ink/90 placeholder:text-muted-foreground/40 focus:outline-none no-scrollbar whitespace-pre-wrap disabled:opacity-70 disabled:cursor-not-allowed"
-      />
+      <div className="relative mt-4 min-h-0 flex-1">
+        <button
+          onClick={() => setPreview((v) => !v)}
+          data-testid="content-preview-toggle"
+          className="absolute right-0 top-0 z-10 flex items-center gap-1 rounded-full border border-border bg-background/80 px-2 py-1 text-[11px] text-muted-foreground hover:text-ink hover:bg-accent/50 transition-colors"
+          title={preview ? "Edit raw text" : "Preview rendered markdown"}
+        >
+          {preview ? <Pencil className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+          {preview ? "Edit" : "Preview"}
+        </button>
+
+        {preview ? (
+          <div
+            data-testid="detail-content-preview"
+            className="h-full w-full overflow-y-auto no-scrollbar pr-16 text-base text-ink/90"
+          >
+            {content.trim() ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                {content}
+              </ReactMarkdown>
+            ) : (
+              <p className="text-muted-foreground/40">Nothing to preview yet.</p>
+            )}
+          </div>
+        ) : (
+          <textarea
+            ref={contentAreaRef}
+            data-testid="detail-content-input"
+            value={content}
+            onChange={(e) => change("content", e.target.value, setContent)}
+            placeholder="Start writing…"
+            disabled={locked}
+            className="h-full w-full resize-none bg-transparent text-base leading-relaxed text-ink/90 placeholder:text-muted-foreground/40 focus:outline-none no-scrollbar whitespace-pre-wrap disabled:opacity-70 disabled:cursor-not-allowed"
+          />
+        )}
+      </div>
 
       {/* subtle metadata bar — everything about classifying comes AFTER writing */}
       <div className="mt-4 shrink-0 border-t border-border pt-3">
