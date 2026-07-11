@@ -93,3 +93,8 @@ server/gaia-backend/.hermes-home/
 # Vendored native binaries (llama.cpp/ggml) for the local model sidecar —
 # large, platform-specific, not source — fetched/built separately, not committed.
 src-tauri/binaries/
+
+# ChatGPT bulk importer — logged-in browser profile (session cookies) and
+# per-user import progress, neither of which is source.
+tools/chatgpt_bulk_import/.chatgpt_profile/
+tools/chatgpt_bulk_import/imported.json
