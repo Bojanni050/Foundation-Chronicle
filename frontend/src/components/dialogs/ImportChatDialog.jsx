@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { Upload, Loader2, FileText } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Upload, Loader2, FileText, Play, Square } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { getSettings } from "@/lib/settings";
@@ -26,6 +26,63 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
   const [statusText, setStatusText] = useState("");
   const [msg, setMsg] = useState("");
   const fileRef = useRef(null);
+
+  // Bulk-import tab state — polls the Chronicle backend, which owns the
+  // actual Python/Playwright subprocess (see server/chatgptImportManager.js).
+  const [bulkLimit, setBulkLimit] = useState("");
+  const [bulkStatus, setBulkStatus] = useState({ running: false, lines: [] });
+  const [bulkError, setBulkError] = useState("");
+  const bulkLogRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const { apiUrl } = getSettings();
+        const res = await fetch(`${apiUrl}/api/settings/chatgpt-import/status`);
+        if (res.ok && !cancelled) setBulkStatus(await res.json());
+      } catch {
+        /* local server may be unreachable — just try again next tick */
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [open]);
+
+  useEffect(() => {
+    bulkLogRef.current?.scrollTo({ top: bulkLogRef.current.scrollHeight });
+  }, [bulkStatus.lines]);
+
+  const startBulkImport = async () => {
+    setBulkError("");
+    try {
+      const { apiUrl } = getSettings();
+      const res = await fetch(`${apiUrl}/api/settings/chatgpt-import/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: bulkLimit ? Number(bulkLimit) : undefined }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setBulkError(body.reason === "already_running" ? "Already running." : "Could not start.");
+        return;
+      }
+      setBulkStatus((s) => ({ ...s, running: true }));
+    } catch {
+      setBulkError("Can't reach local server. Is `npm run server` running?");
+    }
+  };
+
+  const stopBulkImport = async () => {
+    try {
+      const { apiUrl } = getSettings();
+      await fetch(`${apiUrl}/api/settings/chatgpt-import/stop`, { method: "POST" });
+    } catch {
+      /* ignore */
+    }
+  };
 
   const importObjects = async (entries) => {
     setBusy(true);
@@ -145,9 +202,10 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
           <DialogTitle className="font-serif text-xl">Import chat</DialogTitle>
         </DialogHeader>
         <Tabs defaultValue="paste">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="paste" data-testid="import-tab-paste">Paste text</TabsTrigger>
             <TabsTrigger value="upload" data-testid="import-tab-upload">Upload files</TabsTrigger>
+            <TabsTrigger value="bulk" data-testid="import-tab-bulk">ChatGPT bulk</TabsTrigger>
           </TabsList>
 
           <TabsContent value="paste" className="mt-4 space-y-3">
@@ -189,6 +247,61 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
               data-testid="import-file-input"
               onChange={(e) => handleFiles(e.target.files)}
             />
+          </TabsContent>
+
+          <TabsContent value="bulk" className="mt-4 space-y-3">
+            <p className="text-xs text-muted-foreground/80 leading-relaxed">
+              Drives a real logged-in browser through your whole ChatGPT sidebar history and imports every
+              conversation. First run opens a visible Chrome window to log in — after that it's cached and
+              can run in the background. See <code>tools/chatgpt_bulk_import/README.md</code>.
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1"
+                value={bulkLimit}
+                onChange={(e) => setBulkLimit(e.target.value)}
+                disabled={bulkStatus.running}
+                placeholder="All conversations"
+                data-testid="bulk-limit-input"
+                className="w-40 rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-40"
+              />
+              {bulkStatus.running ? (
+                <button
+                  onClick={stopBulkImport}
+                  data-testid="bulk-stop-btn"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-destructive py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors"
+                >
+                  <Square className="w-4 h-4" />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  onClick={startBulkImport}
+                  data-testid="bulk-start-btn"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-ink py-2 text-sm font-medium text-background hover:bg-ink/90 transition-colors"
+                >
+                  <Play className="w-4 h-4" />
+                  Start bulk import
+                </button>
+              )}
+            </div>
+            {bulkError && <p className="text-xs text-destructive" data-testid="bulk-error">{bulkError}</p>}
+            <div
+              ref={bulkLogRef}
+              data-testid="bulk-log"
+              className="h-40 w-full overflow-y-auto rounded-xl border border-border bg-card/50 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground"
+            >
+              {bulkStatus.lines?.length ? (
+                bulkStatus.lines.map((l, i) => (
+                  <div key={i} className={l.stream === "stderr" ? "text-destructive/80" : undefined}>
+                    {l.text}
+                  </div>
+                ))
+              ) : (
+                <span className="text-muted-foreground/50">No activity yet.</span>
+              )}
+            </div>
           </TabsContent>
         </Tabs>
         {msg && <p className="text-xs text-destructive" data-testid="import-msg">{msg}</p>}
