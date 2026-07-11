@@ -37,24 +37,113 @@ function providerForUrl(url) {
 // Runs IN the page. Best-effort DOM scraping per provider.
 function scrapeConversation(provider) {
   const turns = [];
+  // Plain innerText collapses lists, code blocks, and emphasis into one
+  // unstructured blob. Chronicle's note view is plain text (no markdown
+  // renderer), so this doesn't produce rich formatting — but markdown-style
+  // conventions (fenced code, "- " list markers, blank-line paragraphs) stay
+  // legible even unrendered and preserve the structure that innerText loses.
+  const nodeToMarkdown = (root) => {
+    let out = "";
+    const listStack = [];
+    const walk = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        // Skip whitespace-only text nodes that contain a newline — those are
+        // indentation between tags in the source markup, not real inline
+        // spacing (real spacing between inline elements is a single space
+        // with no newline, e.g. "bold <em>text</em>").
+        if (/^\s*$/.test(node.textContent) && node.textContent.includes("\n")) return;
+        out += node.textContent;
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName.toLowerCase();
+      if (tag === "script" || tag === "style" || tag === "noscript") return;
+      if (tag === "br") { out += "\n"; return; }
+      if (tag === "pre") {
+        out += "\n```\n" + node.textContent.replace(/\s+$/, "") + "\n```\n";
+        return;
+      }
+      if (tag === "code" && !node.closest("pre")) {
+        out += "`" + node.textContent + "`";
+        return;
+      }
+      if (tag === "strong" || tag === "b") {
+        out += "**"; node.childNodes.forEach(walk); out += "**";
+        return;
+      }
+      if (tag === "em" || tag === "i") {
+        out += "*"; node.childNodes.forEach(walk); out += "*";
+        return;
+      }
+      if (tag === "a") {
+        const start = out.length;
+        node.childNodes.forEach(walk);
+        const text = out.slice(start).trim();
+        const href = node.getAttribute("href");
+        if (href && href.startsWith("http") && text && !text.includes(href)) {
+          out = out.slice(0, start) + `${text} (${href})`;
+        }
+        return;
+      }
+      if (tag === "ul" || tag === "ol") {
+        listStack.push({ ordered: tag === "ol", index: 1 });
+        out += "\n";
+        node.childNodes.forEach(walk);
+        listStack.pop();
+        out += "\n";
+        return;
+      }
+      if (tag === "li") {
+        const ctx = listStack[listStack.length - 1];
+        out += "\n" + (ctx && ctx.ordered ? `${ctx.index++}. ` : "- ");
+        node.childNodes.forEach(walk);
+        return;
+      }
+      if (/^h[1-6]$/.test(tag)) {
+        out += "\n" + "#".repeat(Number(tag[1])) + " ";
+        node.childNodes.forEach(walk);
+        out += "\n";
+        return;
+      }
+      if (tag === "blockquote") {
+        const start = out.length;
+        node.childNodes.forEach(walk);
+        const inner = out.slice(start).trim();
+        out = out.slice(0, start) + inner.split("\n").map((l) => "> " + l).join("\n") + "\n";
+        return;
+      }
+      const isBlock = ["p", "div", "section", "article", "table", "tr", "td", "th"].includes(tag);
+      if (isBlock) out += "\n";
+      node.childNodes.forEach(walk);
+      if (isBlock) out += "\n";
+    };
+    walk(root);
+    return out.replace(/\n{3,}/g, "\n\n").trim();
+  };
   const push = (role, el) => {
-    const text = (el.innerText || "").trim();
+    const text = nodeToMarkdown(el);
     if (text) turns.push({ role, text });
+  };
+  // Some multi-selector queries match nested elements for the same logical
+  // message (e.g. Gemini's model-response wrapper AND its inner
+  // message-content/.model-response-text) — querySelectorAll doesn't dedupe
+  // ancestor+descendant matches, so each nesting level was getting pushed as
+  // its own turn with the same (or overlapping) text. Keep only the
+  // innermost match per set so a turn is captured once.
+  const leavesOnly = (nodeList) => {
+    const nodes = Array.from(nodeList);
+    return nodes.filter((n) => !nodes.some((other) => other !== n && n.contains(other)));
   };
 
   if (provider === "claude") {
-    document.querySelectorAll('[data-testid="user-message"], .font-user-message, div[data-testid], .font-claude-message').forEach(() => {});
-    const userMsgs = document.querySelectorAll('[data-testid="user-message"]');
-    const aiMsgs = document.querySelectorAll('.font-claude-message');
-    // fall back to ordered walk
-    const nodes = document.querySelectorAll('[data-testid="user-message"], .font-claude-message');
+    const nodes = leavesOnly(document.querySelectorAll('[data-testid="user-message"], .font-claude-message'));
     nodes.forEach((n) => {
       const isUser = n.matches('[data-testid="user-message"]');
       push(isUser ? "user" : "assistant", n);
     });
     if (!turns.length) {
-      userMsgs.forEach((n) => push("user", n));
-      aiMsgs.forEach((n) => push("assistant", n));
+      leavesOnly(document.querySelectorAll('[data-testid="user-message"]')).forEach((n) => push("user", n));
+      leavesOnly(document.querySelectorAll('.font-claude-message')).forEach((n) => push("assistant", n));
     }
   } else if (provider === "chatgpt") {
     document.querySelectorAll('[data-message-author-role]').forEach((n) => {
@@ -62,8 +151,8 @@ function scrapeConversation(provider) {
       push(role, n);
     });
   } else if (provider === "gemini") {
-    document.querySelectorAll("user-query, .query-text").forEach((n) => push("user", n));
-    document.querySelectorAll("model-response, message-content, .model-response-text").forEach((n) => push("assistant", n));
+    leavesOnly(document.querySelectorAll("user-query, .query-text")).forEach((n) => push("user", n));
+    leavesOnly(document.querySelectorAll("model-response, message-content, .model-response-text")).forEach((n) => push("assistant", n));
     // best-effort ordered fallback
     if (!turns.length) {
       document.querySelectorAll('[class*="conversation"] [class*="text"]').forEach((n) => push("user", n));
