@@ -15,6 +15,13 @@ class BaseProvider(ABC):
     @property
     @abstractmethod
     def start_url(self) -> str:
+        """The base URL to start scraping from."""
+        pass
+
+    @property
+    @abstractmethod
+    def message_wait_selector(self) -> str:
+        """CSS selector to wait for when a conversation page loads, indicating messages are visible."""
         pass
 
     @abstractmethod

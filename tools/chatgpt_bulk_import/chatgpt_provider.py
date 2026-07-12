@@ -30,6 +30,10 @@ class ChatGPTProvider(BaseProvider):
     def start_url(self) -> str:
         return "https://chatgpt.com/"
 
+    @property
+    def message_wait_selector(self) -> str:
+        return "[data-message-author-role]"
+
     def is_logged_in(self, page) -> bool:
         try:
             return page.query_selector('a[href^="/c/"]') is not None

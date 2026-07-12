@@ -21,6 +21,10 @@ class GeminiProvider(BaseProvider):
     def start_url(self) -> str:
         return "https://gemini.google.com"
 
+    @property
+    def message_wait_selector(self) -> str:
+        return 'message-content, user-query, [class*="user"], [class*="model"]'
+
     def is_logged_in(self, page) -> bool:
         try:
             # Check for chat window or history links to confirm logged in status

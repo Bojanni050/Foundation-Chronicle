@@ -59,7 +59,7 @@ def import_conversation(provider, page, url, title_hint, api_url, token):
     page.goto(url, wait_until="domcontentloaded")
     try:
         # Wait a bit so the conversation renders
-        page.wait_for_selector("[data-message-author-role]", timeout=15000)
+        page.wait_for_selector(provider.message_wait_selector, timeout=15000)
     except PWTimeout:
         print(f"  ! no messages found, skipping: {url}")
         return False
