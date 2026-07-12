@@ -20,6 +20,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 from transport import load_state, save_state, post_import, post_attachment
 from chatgpt_provider import ChatGPTProvider
+from gemini_provider import GeminiProvider
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE_FILE = Path(__file__).resolve().parent / "imported.json"
@@ -104,6 +105,7 @@ def main():
     parser.add_argument("--limit", type=int, default=None, help="Only import the N most recent conversations")
     parser.add_argument("--headless", action="store_true", help="Run without a visible browser window")
     parser.add_argument("--delay", type=float, default=2.0, help="Seconds to wait between conversations")
+    parser.add_argument("--provider", choices=["chatgpt", "gemini"], default="chatgpt", help="Which provider to import from")
     args = parser.parse_args()
 
     token = args.token
@@ -117,7 +119,11 @@ def main():
     state = load_state(STATE_FILE)
     imported = set(state.get("imported_urls", []))
 
-    provider = ChatGPTProvider()
+    if args.provider == "gemini":
+        provider = GeminiProvider()
+    else:
+        provider = ChatGPTProvider()
+        
     profile_dir = Path(__file__).resolve().parent / provider.profile_dir_name
     profile_dir.mkdir(exist_ok=True)
 
