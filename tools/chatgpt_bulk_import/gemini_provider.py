@@ -23,7 +23,7 @@ class GeminiProvider(BaseProvider):
 
     @property
     def message_wait_selector(self) -> str:
-        return 'message-content, user-query, [class*="user"], [class*="model"]'
+        return 'user-query, model-response'
 
     def is_logged_in(self, page) -> bool:
         try:
@@ -103,7 +103,7 @@ class GeminiProvider(BaseProvider):
         # We use a broad heuristic looking for user queries vs model responses.
         handle = page.evaluate_handle(
             """() => {
-                const anyMsg = document.querySelector('message-content, user-query');
+                const anyMsg = document.querySelector('user-query, model-response');
                 let el = anyMsg && anyMsg.parentElement;
                 while (el) {
                     const style = getComputedStyle(el);
@@ -119,9 +119,13 @@ class GeminiProvider(BaseProvider):
         def snapshot():
             return page.evaluate(
                 """() => {
-                    const nodes = Array.from(document.querySelectorAll('message-content, user-query, [class*="user"], [class*="model"]'));
+                    const allNodes = Array.from(document.querySelectorAll('user-query, model-response'));
+                    // Filter out any nodes that are inside other matched nodes (just to be absolutely safe against nesting)
+                    const nodes = allNodes.filter(n => !allNodes.some(p => p !== n && p.contains(n)));
+                    
                     return nodes.map(n => {
-                        const isUser = n.tagName.toLowerCase().includes('user') || (n.className && n.className.includes('user'));
+                        const tag = n.tagName.toLowerCase();
+                        const isUser = tag.includes('user');
                         return {
                             role: isUser ? 'user' : 'assistant',
                             html: n.innerHTML,
