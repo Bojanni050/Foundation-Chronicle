@@ -52,8 +52,10 @@ function buildGraph(objects, kenmerken) {
 
   // Inferred (AI Weave-style) relatedness — same local scoring as the app's
   // own weave panel, thresholded so the graph doesn't drown in weak edges.
+  // We use a Map cache to avoid re-tokenizing the same text thousands of times.
+  const weaveCache = new Map();
   for (const o of objects) {
-    for (const rel of findRelatedLocal(o, objects, 4)) {
+    for (const rel of findRelatedLocal(o, objects, 4, weaveCache)) {
       if (rel.score < 0.15) continue;
       const key = [o.id, rel.id].sort().join("::");
       if (seenPairs.has(key)) continue;
