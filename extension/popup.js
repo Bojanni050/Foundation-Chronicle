@@ -182,21 +182,36 @@ async function scrapeConversation(provider) {
   };
 
   // Walk the whole conversation to collect every turn, not just whatever
-  // was mounted when the popup opened. Merges by content so re-mounted
-  // duplicates from virtualization collapse into one. Also tracks the last
-  // ChatGPT date-separator label seen along the way, for occurredAt below.
+  // was mounted when the popup opened. Also tracks the last ChatGPT
+  // date-separator label seen along the way, for occurredAt below.
   let lastDateLabel = provider === "chatgpt" ? getLastSeparatorLabel() : null;
   const collectAllTurns = async () => {
-    const seenKeys = new Set();
     const merged = [];
+    // Consecutive scroll steps overlap on purpose (so virtualization can't
+    // hide anything between them), which means the same real turns show up
+    // in more than one snapshot. Deduping by "have I seen this role+text
+    // anywhere before" — the previous approach — also silently collapses
+    // turns that are *genuinely* repeated (someone saying "ja" three times
+    // in a row becomes one "ja"). Overlap-stitching instead: find how much
+    // of the START of this snapshot matches the END of what's already
+    // merged, and append only what comes after that overlap. That's
+    // position-aware rather than content-aware, so real repeats — which
+    // appear as extra entries beyond the matched overlap, not swallowed by
+    // it — survive.
     const mergeIn = (snapshot) => {
-      for (const t of snapshot) {
-        const key = t.role + "::" + t.text;
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          merged.push(t);
+      const maxOverlap = Math.min(merged.length, snapshot.length);
+      let overlap = 0;
+      for (let candidate = maxOverlap; candidate > 0; candidate--) {
+        let matches = true;
+        for (let i = 0; i < candidate; i++) {
+          const a = merged[merged.length - candidate + i];
+          const b = snapshot[i];
+          if (a.role !== b.role || a.text !== b.text) { matches = false; break; }
         }
+        if (matches) { overlap = candidate; break; }
       }
+      for (let i = overlap; i < snapshot.length; i++) merged.push(snapshot[i]);
+
       if (provider === "chatgpt") {
         const label = getLastSeparatorLabel();
         if (label) lastDateLabel = label; // later snapshots are further down -> more recent

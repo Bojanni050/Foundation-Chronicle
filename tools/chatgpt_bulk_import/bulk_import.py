@@ -405,17 +405,34 @@ def collect_turns(page):
             break
         last_height = height
 
-    seen = set()
     merged = []
     last_date_label = get_last_separator_label(page)
 
     def merge_in(items):
+        # Consecutive scroll steps overlap on purpose (so virtualization
+        # can't hide anything between them), so the same real turns show up
+        # in more than one snapshot. Deduping by "have I seen this role+html
+        # anywhere before" - the previous approach - also silently collapses
+        # turns that are *genuinely* repeated (someone saying "ja" three
+        # times in a row becomes one "ja"). Overlap-stitching instead: find
+        # how much of the START of this snapshot matches the END of what's
+        # already merged, and append only what comes after that overlap.
+        # That's position-aware rather than content-aware, so real repeats -
+        # which appear as extra entries beyond the matched overlap, not
+        # swallowed by it - survive.
         nonlocal last_date_label
-        for item in items:
-            key = item["role"] + "::" + item["html"]
-            if key not in seen:
-                seen.add(key)
-                merged.append(item)
+        max_overlap = min(len(merged), len(items))
+        overlap = 0
+        for candidate in range(max_overlap, 0, -1):
+            if all(
+                merged[len(merged) - candidate + i]["role"] == items[i]["role"]
+                and merged[len(merged) - candidate + i]["html"] == items[i]["html"]
+                for i in range(candidate)
+            ):
+                overlap = candidate
+                break
+        merged.extend(items[overlap:])
+
         label = get_last_separator_label(page)
         if label:
             last_date_label = label
