@@ -326,8 +326,10 @@ def collect_conversation_links(page, limit=None):
     SETTLE_WAIT_MS = 1500
     REQUIRED_STABLE_SETTLES = 4
     stable_settles = 0
-    for i in range(200):
+    exhausted = False
+    for i in range(300):
         if limit and len(seen) >= limit:
+            exhausted = True
             break
         before_links = len(seen)
         before_height = page.evaluate("(el) => el.scrollHeight", handle)
@@ -342,7 +344,12 @@ def collect_conversation_links(page, limit=None):
 
         print(f"  [diag] round {i}: links={len(seen)} height={before_height}->{after_height} grew={grew} stableSettles={stable_settles}")
         if stable_settles >= REQUIRED_STABLE_SETTLES:
+            exhausted = True
             break
+            
+    if not exhausted and not limit:
+        print("  ! warning: reached max scroll attempts, sidebar may be incomplete")
+        
     items = list(seen.items())
     return items[:limit] if limit else items
 
@@ -405,13 +412,18 @@ def collect_turns(page):
         )
 
     last_height = -1
+    reached_top = False
     for _ in range(60):
         page.evaluate("(el) => { el.scrollTop = 0; }", handle)
         page.wait_for_timeout(350)
         height = page.evaluate("(el) => el.scrollHeight", handle)
         if height == last_height:
+            reached_top = True
             break
         last_height = height
+        
+    if not reached_top:
+        print("  ! warning: reached max scroll-up attempts (60), conversation may be truncated at the top")
 
     merged = []
     last_date_label = get_last_separator_label(page)
@@ -449,12 +461,14 @@ def collect_turns(page):
     page.wait_for_timeout(200)
     merge_in(snapshot())
 
+    reached_bottom = False
     for _ in range(500):
         at_bottom = page.evaluate(
             "(el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 4", handle
         )
         if at_bottom:
             merge_in(snapshot())
+            reached_bottom = True
             break
         page.evaluate(
             "(el) => { el.scrollTop = Math.min(el.scrollTop + el.clientHeight * 0.5, el.scrollHeight); }",
@@ -462,6 +476,9 @@ def collect_turns(page):
         )
         page.wait_for_timeout(280)
         merge_in(snapshot())
+
+    if not reached_bottom:
+        print("  ! warning: reached max scroll-down attempts (500), conversation may be incomplete")
 
     turns = []
     images = []
@@ -569,9 +586,12 @@ def main():
         except Exception:
             print("Real Chrome not found (channel='chrome') — falling back to Playwright's bundled Chromium.")
             context = p.chromium.launch_persistent_context(str(PROFILE_DIR), **launch_kwargs)
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
-        )
+        context.add_init_script(\"""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.navigator.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        \""")
         page = context.pages[0] if context.pages else context.new_page()
         page.goto("https://chatgpt.com/", wait_until="domcontentloaded")
 

@@ -106,17 +106,28 @@ async function startBulkImport({ limit, headless } = {}) {
     importProcess = child;
     startedAt = new Date().toISOString();
 
+    let stdoutBuffer = "";
     child.stdout.on("data", (data) => {
-      data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => pushLogLine("stdout", line));
+      stdoutBuffer += data.toString();
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() || "";
+      lines.filter(Boolean).forEach((line) => pushLogLine("stdout", line));
     });
+
+    let stderrBuffer = "";
     child.stderr.on("data", (data) => {
-      data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => pushLogLine("stderr", line));
+      stderrBuffer += data.toString();
+      const lines = stderrBuffer.split(/\r?\n/);
+      stderrBuffer = lines.pop() || "";
+      lines.filter(Boolean).forEach((line) => pushLogLine("stderr", line));
     });
     child.on("error", (err) => {
       pushLogLine("stderr", `Failed to start: ${err.message}`);
       if (importProcess === child) importProcess = null;
     });
     child.on("exit", (code, signal) => {
+      if (stdoutBuffer) pushLogLine("stdout", stdoutBuffer);
+      if (stderrBuffer) pushLogLine("stderr", stderrBuffer);
       pushLogLine("stdout", `Process exited (code=${code}, signal=${signal}).`);
       if (importProcess === child) importProcess = null;
     });
