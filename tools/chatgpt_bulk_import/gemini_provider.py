@@ -24,7 +24,9 @@ class GeminiProvider(BaseProvider):
     def is_logged_in(self, page) -> bool:
         try:
             # Check for chat window or history links to confirm logged in status
-            return page.query_selector('chat-window, .chat-history, a[href*="/app/"]') is not None
+            # Do not use simple href checks as the splash page might have them.
+            # Look for the user avatar, prompt textarea, or the history container.
+            return page.query_selector('rich-textarea, [aria-label*="Google Account"], [role="textbox"]') is not None
         except Exception:
             return False
 

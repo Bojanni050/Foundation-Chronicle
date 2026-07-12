@@ -142,10 +142,10 @@ def main():
             context = p.chromium.launch_persistent_context(str(profile_dir), **launch_kwargs)
         
         context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            window.navigator.chrome = { runtime: {} };
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); } catch(e) {}
+            try { if (!window.navigator.chrome) { window.navigator.chrome = { runtime: {} }; } } catch(e) {}
+            try { Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] }); } catch(e) {}
+            try { Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] }); } catch(e) {}
         """)
         
         page = context.pages[0] if context.pages else context.new_page()
