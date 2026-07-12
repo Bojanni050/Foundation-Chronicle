@@ -24,7 +24,7 @@ function fuzzyMatch(query, text) {
 // deliberately NOT in this list: pipelines like persona consolidation still
 // need to mark a locked object as "seen" without that counting as altering it.
 const LOCKED_PROTECTED_FIELDS = [
-  "title", "content", "tags", "type", "source", "sourceProvider", "sourceUrl",
+  "title", "content", "turns", "tags", "type", "source", "sourceProvider", "sourceUrl",
   "occurredAt", "validFrom", "validTo", "temporalText", "links",
 ];
 
@@ -52,6 +52,7 @@ export class ObjectRepository {
   async search(_query) { throw new Error("not implemented"); }
   async counts() { throw new Error("not implemented"); }
   async findByContentHash(_hash) { throw new Error("not implemented"); }
+  async findByProviderConversationId(_id) { throw new Error("not implemented"); }
 }
 
 export class IndexedDBObjectRepository extends ObjectRepository {
@@ -64,6 +65,14 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       content: data.content || "",
       contentHash: data.contentHash || (data.content ? contentHash(data.content) : ""),
       tags: Array.isArray(data.tags) ? data.tags : [],
+      // Structured { role, text } turns, persisted so chat objects can be
+      // rendered as real chat bubbles from the actual data instead of
+      // pattern-matching "H: "/"A: " prefixes in the flattened `content`
+      // string — that convention breaks for a turn starting with a heading/
+      // code fence/list, and can false-positive on an ordinary note whose
+      // text happens to start with "A: ". Empty for object types that were
+      // never a chat, and for chat objects imported before this field existed.
+      turns: Array.isArray(data.turns) ? data.turns : [],
       // Metadata only ({id, filename, mimeType, size, url} per item) — the
       // actual bytes live on the local server (server/data/attachments/),
       // never in IndexedDB, to keep large binaries out of browser storage.
@@ -71,6 +80,13 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       source: data.source || "manual",
       sourceProvider: data.sourceProvider || null,
       sourceUrl: data.sourceUrl || null,
+      // Stable identity for the conversation this object came from — see
+      // lib/providerConversationId.js. Lets pollInbox() recognize "this is
+      // the same chat, re-imported" (via extension + bulk importer, or a
+      // re-run after the chat grew) and update the existing object instead
+      // of creating a duplicate, which contentHash alone can't do since it
+      // changes whenever the conversation's content changes.
+      providerConversationId: data.providerConversationId || null,
       links: Array.isArray(data.links) ? data.links : [],
       occurredAt: data.occurredAt || null,
       validFrom: data.validFrom || null,
@@ -199,5 +215,12 @@ export class IndexedDBObjectRepository extends ObjectRepository {
     const db = await getDB();
     const all = await db.getAll(OBJECT_STORE);
     return all.find((o) => o.contentHash === hash) || null;
+  }
+
+  async findByProviderConversationId(providerConversationId) {
+    if (!providerConversationId) return null;
+    const db = await getDB();
+    const all = await db.getAll(OBJECT_STORE);
+    return all.find((o) => o.providerConversationId === providerConversationId) || null;
   }
 }

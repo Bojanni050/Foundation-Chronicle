@@ -23,38 +23,10 @@ const PROVIDER_LABEL = { claude: "Claude", chatgpt: "ChatGPT", gemini: "Gemini" 
 // Matches the app's own tokens (ink/primary/accent/border) rather than a
 // generic typography plugin, so rendered markdown looks native to Chronicle
 // instead of like a foreign "prose" block.
-const MARKDOWN_COMPONENTS = {
+const BASE_MARKDOWN_COMPONENTS = {
   h1: (p) => <h1 className="font-serif text-2xl text-ink mt-5 mb-2 first:mt-0" {...p} />,
   h2: (p) => <h2 className="font-serif text-xl text-ink mt-4 mb-2 first:mt-0" {...p} />,
   h3: (p) => <h3 className="font-serif text-lg text-ink mt-3 mb-1.5 first:mt-0" {...p} />,
-  p: ({ children, ...props }) => {
-    const childArray = Array.isArray(children) ? children : [children];
-    const firstChild = childArray[0];
-    
-    if (typeof firstChild === 'string') {
-      const match = firstChild.match(/^(H|A):\s(.*)/s);
-      if (match) {
-        const isHuman = match[1] === 'H';
-        const newChildren = [match[2], ...childArray.slice(1)];
-        
-        return (
-          <div className={`mb-4 flex w-full ${isHuman ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[90%] sm:max-w-[85%] rounded-2xl px-4 py-3 ${
-              isHuman 
-                ? 'bg-primary/10 text-ink font-medium' 
-                : 'bg-accent/40 text-ink font-normal'
-            }`}>
-              <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isHuman ? 'text-primary/80' : 'text-muted-foreground/70'}`}>
-                {isHuman ? 'Ik' : 'AI'}
-              </div>
-              <div className="leading-relaxed break-words whitespace-pre-wrap">{newChildren}</div>
-            </div>
-          </div>
-        );
-      }
-    }
-    return <p className="mb-3 last:mb-0 leading-relaxed" {...props}>{children}</p>;
-  },
   ul: (p) => <ul className="mb-3 ml-5 list-disc space-y-1" {...p} />,
   ol: (p) => <ol className="mb-3 ml-5 list-decimal space-y-1" {...p} />,
   li: (p) => <li {...p} />,
@@ -82,6 +54,74 @@ const MARKDOWN_COMPONENTS = {
     return <code className="rounded bg-accent px-1 py-0.5 text-[0.85em] text-ink">{text}</code>;
   },
 };
+
+// Used inside a single chat-bubble's own markdown (see the object.turns
+// render path below) — just a plain paragraph, no bubble-wrapping, since
+// the bubble is already built around it by the caller.
+const PLAIN_MARKDOWN_COMPONENTS = {
+  ...BASE_MARKDOWN_COMPONENTS,
+  p: (p) => <p className="mb-3 last:mb-0 leading-relaxed" {...p} />,
+};
+
+// Fallback for chat objects imported before `turns` was persisted on the
+// object (or any other content that happens to use the "H: "/"A: " text
+// convention) — matches a paragraph's literal prefix to decide if it's a
+// chat bubble. Fragile by construction (breaks on a turn starting with a
+// heading/code fence/list, and can false-positive on an ordinary note whose
+// text happens to start with "A: "), which is exactly why object.turns is
+// used instead whenever it's available.
+const MARKDOWN_COMPONENTS = {
+  ...BASE_MARKDOWN_COMPONENTS,
+  p: ({ children, ...props }) => {
+    const childArray = Array.isArray(children) ? children : [children];
+    const firstChild = childArray[0];
+
+    if (typeof firstChild === 'string') {
+      const match = firstChild.match(/^(H|A):\s(.*)/s);
+      if (match) {
+        const isHuman = match[1] === 'H';
+        const newChildren = [match[2], ...childArray.slice(1)];
+
+        return (
+          <div className={`mb-4 flex w-full ${isHuman ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[90%] sm:max-w-[85%] rounded-2xl px-4 py-3 ${
+              isHuman
+                ? 'bg-primary/10 text-ink font-medium'
+                : 'bg-accent/40 text-ink font-normal'
+            }`}>
+              <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isHuman ? 'text-primary/80' : 'text-muted-foreground/70'}`}>
+                {isHuman ? 'Ik' : 'AI'}
+              </div>
+              <div className="leading-relaxed break-words whitespace-pre-wrap">{newChildren}</div>
+            </div>
+          </div>
+        );
+      }
+    }
+    return <p className="mb-3 last:mb-0 leading-relaxed" {...props}>{children}</p>;
+  },
+};
+
+// Chat bubble wrapper for a single turn rendered from object.turns — pulled
+// out so the structure (role -> alignment/color/label) lives in exactly one
+// place instead of being duplicated per turn in the render below.
+function ChatBubble({ turn }) {
+  const isHuman = turn.role !== "assistant";
+  return (
+    <div className={`mb-4 flex w-full ${isHuman ? "justify-end" : "justify-start"}`}>
+      <div className={`max-w-[90%] sm:max-w-[85%] rounded-2xl px-4 py-3 ${isHuman ? "bg-primary/10 text-ink font-medium" : "bg-accent/40 text-ink font-normal"}`}>
+        <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isHuman ? "text-primary/80" : "text-muted-foreground/70"}`}>
+          {isHuman ? "Ik" : "AI"}
+        </div>
+        <div className="leading-relaxed break-words">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={PLAIN_MARKDOWN_COMPONENTS}>
+            {turn.text || ""}
+          </ReactMarkdown>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function formatForInput(iso) {
   if (!iso) return "";
@@ -116,7 +156,11 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
   const [aiNote, setAiNote] = useState("");
   const [locked, setLocked] = useState(!!object.locked);
   const [lockBusy, setLockBusy] = useState(false);
-  const [preview, setPreview] = useState(!!(object.title || object.content));
+  // Driven by actual CONTENT, not title-or-content — a fresh object with
+  // only an auto-filled title and no content yet has nothing to preview,
+  // and should drop straight into the writing surface rather than opening
+  // in preview mode with an empty-looking body.
+  const [preview, setPreview] = useState(!!(object.content && object.content.trim()));
   const [lightboxIndex, setLightboxIndex] = useState(null);
   const timer = useRef(null);
   const idRef = useRef(object.id);
@@ -143,7 +187,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
     setAiNote("");
     setLocked(!!object.locked);
     const isNew = !object.title && !object.content;
-    setPreview(!isNew);
+    setPreview(!!(object.content && object.content.trim()));
     setLightboxIndex(null);
     // content-first capture: a fresh, empty entry drops the cursor straight
     // into the writing surface — no type to pick first.
@@ -219,6 +263,11 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
   const { apiUrl } = getSettings();
   const attachments = object.attachments || [];
   const imageAttachments = attachments.filter((att) => (att.mimeType || "").startsWith("image/"));
+  // Structured turns win over the "H: "/"A: " text-prefix convention
+  // whenever they're actually there — see MARKDOWN_COMPONENTS' comment for
+  // why that convention is fragile. Only chat objects have turns; a note
+  // whose content happens to start with "A: " is never affected either way.
+  const hasTurns = object.type === "chat" && Array.isArray(object.turns) && object.turns.length > 0;
 
   return (
     <div className="mx-auto flex h-full w-full max-w-2xl flex-col px-10 pt-10 pb-6 rise-in" data-testid="object-detail">
@@ -231,6 +280,10 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
+            // Locked objects can't be edited either way (the textarea
+            // below is disabled) — dropping out of preview would just land
+            // on a body the user can visibly see but can't type into.
+            if (locked) return;
             if (preview) {
               setPreview(false);
               requestAnimationFrame(() => contentAreaRef.current?.focus());
@@ -260,7 +313,9 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
             data-testid="detail-content-preview"
             className="h-full w-full overflow-y-auto no-scrollbar pr-16 text-base text-ink/90"
           >
-            {content.trim() ? (
+            {hasTurns ? (
+              object.turns.map((t, i) => <ChatBubble key={i} turn={t} />)
+            ) : content.trim() ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                 {content}
               </ReactMarkdown>

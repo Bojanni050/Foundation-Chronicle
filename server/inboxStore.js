@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { contentHash } = require("./contentHash");
+const { deriveProviderConversationId } = require("./providerConversationId");
 
 // Shared by server/index.js (extension imports) and screenpipeIngest.js
 // (automatic activity capture) — a single read/write path avoids two writers
@@ -34,7 +35,23 @@ function pushToInbox(item) {
   if (hash && inbox.some((existing) => existing.contentHash === hash)) {
     return item;
   }
-  const entry = { ...item, contentHash: hash };
+
+  const providerConversationId = deriveProviderConversationId(item.sourceProvider, item.url);
+  const entry = { ...item, contentHash: hash, providerConversationId };
+
+  if (providerConversationId) {
+    const existingIdx = inbox.findIndex((e) => e.providerConversationId === providerConversationId);
+    if (existingIdx !== -1) {
+      // Same conversation already queued but not yet claimed — e.g. the
+      // bulk importer re-scraped it with more turns since it was first
+      // queued. Replace with the newer version instead of queueing a
+      // second copy that would become a duplicate object once claimed.
+      inbox[existingIdx] = entry;
+      writeInbox(inbox);
+      return entry;
+    }
+  }
+
   inbox.push(entry);
   writeInbox(inbox);
   return entry;

@@ -148,6 +148,7 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
         source: "import",
         sourceProvider: parsed.sourceProvider || provider || null,
         occurredAt: parsed.occurredAt || null,
+        turns: Array.isArray(parsed.turns) ? parsed.turns : [],
       });
       // Best-effort message/object-level embedding — doesn't block the import
       // if the local server or the embedding model isn't available.
