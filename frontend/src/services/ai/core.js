@@ -113,7 +113,9 @@ export async function chat(messages, extra = {}, model, context = "unknown", cus
 
 export function firstJsonArray(text) {
   // Strip <think>...</think> blocks from reasoning models
-  const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+  let cleaned = (text || "").replace(/<think>[\s\S]*?<\/think>/g, '');
+  // Also strip unclosed <think> block at the end if the model got truncated
+  cleaned = cleaned.replace(/<think>[\s\S]*$/, '');
   
   // Try to find a markdown json block first
   const blockMatch = cleaned.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
