@@ -7,6 +7,20 @@ const CHRONICLE_PORT = process.env.CHRONICLE_PORT || 4577;
 
 let importProcess = null;
 let startedAt = null;
+let lastStoppedAt = 0;
+// Set synchronously (before the first `await`) at the top of
+// startBulkImport, so two near-simultaneous start requests can't both pass
+// the "nothing running yet" check during the grace-period wait below —
+// importProcess alone isn't set until spawn() actually happens, which is on
+// the far side of that wait.
+let starting = false;
+
+// Windows' taskkill /f /t returns as soon as the process tree is signalled,
+// not necessarily once Chrome has fully released the persistent profile
+// directory's lock file — starting a new run immediately after Stop can
+// race that. A short grace period after a stop is cheap insurance; genuine
+// idle time between runs makes this a no-op.
+const RESTART_GRACE_MS = 800;
 
 // Same ring-buffer pattern as gaia-backend/gaiaHermesManager.js — the
 // frontend polls this instead of needing a persistent connection.
@@ -22,50 +36,68 @@ function pushLogLine(stream, text) {
 
 function getStatus() {
   return {
-    running: !!importProcess,
+    running: !!importProcess || starting,
     startedAt,
     lines: recentLogLines,
   };
 }
 
-function startBulkImport({ limit, headless } = {}) {
-  if (importProcess) {
+async function startBulkImport({ limit, headless } = {}) {
+  if (importProcess || starting) {
     return { started: false, reason: "already_running" };
   }
+  starting = true;
 
-  recentLogLines = [];
-  const args = [
-    "-u", // unbuffered stdout — otherwise Python batches lines and the
-    // frontend's log poll would see nothing until the process exits.
-    SCRIPT_PATH,
-    "--api-url", `http://127.0.0.1:${CHRONICLE_PORT}`,
-    "--token", TOKEN,
-  ];
-  if (limit) args.push("--limit", String(limit));
-  if (headless) args.push("--headless");
+  try {
+    const sinceStop = Date.now() - lastStoppedAt;
+    if (sinceStop < RESTART_GRACE_MS) {
+      await new Promise((resolve) => setTimeout(resolve, RESTART_GRACE_MS - sinceStop));
+    }
 
-  pushLogLine("stdout", `Starting bulk import (limit=${limit || "all"}, headless=${!!headless})...`);
-  importProcess = spawn("python", args, {
-    shell: process.platform === "win32", // resolve "python" from PATH, same as gaiaHermesManager
-  });
-  startedAt = new Date().toISOString();
+    recentLogLines = [];
+    const args = [
+      "-u", // unbuffered stdout — otherwise Python batches lines and the
+      // frontend's log poll would see nothing until the process exits.
+      SCRIPT_PATH,
+      "--api-url", `http://127.0.0.1:${CHRONICLE_PORT}`,
+      "--token", TOKEN,
+    ];
+    if (limit) args.push("--limit", String(limit));
+    if (headless) args.push("--headless");
 
-  importProcess.stdout.on("data", (data) => {
-    data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => pushLogLine("stdout", line));
-  });
-  importProcess.stderr.on("data", (data) => {
-    data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => pushLogLine("stderr", line));
-  });
-  importProcess.on("error", (err) => {
-    pushLogLine("stderr", `Failed to start: ${err.message}`);
-    importProcess = null;
-  });
-  importProcess.on("exit", (code, signal) => {
-    pushLogLine("stdout", `Process exited (code=${code}, signal=${signal}).`);
-    importProcess = null;
-  });
+    pushLogLine("stdout", `Starting bulk import (limit=${limit || "all"}, headless=${!!headless})...`);
+    // Captured in this closure so the event handlers below can check "is
+    // this still the current run" by identity — importProcess (the shared,
+    // module-level slot) can already point at a *different*, newer run by
+    // the time an old process's event fires (e.g. a stale "exit" arriving
+    // after Stop was immediately followed by Start). Only the run's own
+    // handlers may clear the shared slot, and only if it's still pointing
+    // at them.
+    const child = spawn("python", args, {
+      shell: process.platform === "win32", // resolve "python" from PATH, same as gaiaHermesManager
+    });
+    importProcess = child;
+    startedAt = new Date().toISOString();
 
-  return { started: true };
+    child.stdout.on("data", (data) => {
+      data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => pushLogLine("stdout", line));
+    });
+    child.stderr.on("data", (data) => {
+      data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => pushLogLine("stderr", line));
+    });
+    child.on("error", (err) => {
+      pushLogLine("stderr", `Failed to start: ${err.message}`);
+      if (importProcess === child) importProcess = null;
+    });
+    child.on("exit", (code, signal) => {
+      pushLogLine("stdout", `Process exited (code=${code}, signal=${signal}).`);
+      if (importProcess === child) importProcess = null;
+    });
+
+    return { started: true };
+  } finally {
+    starting = false;
+  }
 }
 
 function stopBulkImport() {
@@ -81,6 +113,7 @@ function stopBulkImport() {
     try { importProcess.kill("SIGTERM"); } catch { /* already gone */ }
   }
   importProcess = null;
+  lastStoppedAt = Date.now();
   return { stopped: true };
 }
 

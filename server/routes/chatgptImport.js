@@ -12,9 +12,9 @@ router.get("/status", (_req, res) => {
 });
 
 // POST /api/settings/chatgpt-import/start  { limit?: number, headless?: boolean }
-router.post("/start", (req, res) => {
+router.post("/start", async (req, res) => {
   const { limit, headless } = req.body || {};
-  const result = startBulkImport({ limit, headless });
+  const result = await startBulkImport({ limit, headless });
   if (!result.started) return res.status(409).json(result);
   res.json(result);
 });
