@@ -60,7 +60,7 @@ function preflightCheck() {
   return null;
 }
 
-async function startBulkImport({ limit, headless } = {}) {
+async function startBulkImport({ limit, headless, provider = "chatgpt" } = {}) {
   if (status !== "idle" && status !== "exited") {
     return { started: false, reason: "already_running" };
   }
@@ -94,11 +94,12 @@ async function startBulkImport({ limit, headless } = {}) {
       SCRIPT_PATH,
       "--api-url", `http://127.0.0.1:${CHRONICLE_PORT}`,
       "--token", TOKEN,
+      "--provider", provider,
     ];
     if (limit) args.push("--limit", String(limit));
     if (headless) args.push("--headless");
 
-    pushLogLine("stdout", `Starting bulk import (limit=${limit || "all"}, headless=${!!headless})...`);
+    pushLogLine("stdout", `Starting bulk import (provider=${provider}, limit=${limit || "all"}, headless=${!!headless})...`);
     
     const child = spawn("python", args, {
       shell: process.platform === "win32",

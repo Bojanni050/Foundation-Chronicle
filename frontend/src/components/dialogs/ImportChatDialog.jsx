@@ -30,6 +30,7 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
   // Bulk-import tab state — polls the Chronicle backend, which owns the
   // actual Python/Playwright subprocess (see server/chatgptImportManager.js).
   const [bulkLimit, setBulkLimit] = useState("");
+  const [bulkProvider, setBulkProvider] = useState("chatgpt");
   const [bulkStatus, setBulkStatus] = useState({ running: false, lines: [] });
   const [bulkError, setBulkError] = useState("");
   const bulkLogRef = useRef(null);
@@ -62,7 +63,7 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
       const res = await fetch(`${apiUrl}/api/settings/chatgpt-import/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: bulkLimit ? Number(bulkLimit) : undefined }),
+        body: JSON.stringify({ limit: bulkLimit ? Number(bulkLimit) : undefined, provider: bulkProvider }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -206,7 +207,7 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="paste" data-testid="import-tab-paste">Paste text</TabsTrigger>
             <TabsTrigger value="upload" data-testid="import-tab-upload">Upload files</TabsTrigger>
-            <TabsTrigger value="bulk" data-testid="import-tab-bulk">ChatGPT bulk</TabsTrigger>
+            <TabsTrigger value="bulk" data-testid="import-tab-bulk">Bulk Importer</TabsTrigger>
           </TabsList>
 
           <TabsContent value="paste" className="mt-4 space-y-3">
@@ -252,11 +253,20 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
 
           <TabsContent value="bulk" className="mt-4 space-y-3">
             <p className="text-xs text-muted-foreground/80 leading-relaxed">
-              Drives a real logged-in browser through your whole ChatGPT sidebar history and imports every
+              Drives a real logged-in browser through your whole chat history and imports every
               conversation. First run opens a visible Chrome window to log in — after that it's cached and
               can run in the background. See <code>tools/chatgpt_bulk_import/README.md</code>.
             </p>
             <div className="flex items-center gap-2">
+              <select
+                value={bulkProvider}
+                onChange={(e) => setBulkProvider(e.target.value)}
+                disabled={bulkStatus.running}
+                className="w-36 rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-40"
+              >
+                <option value="chatgpt">ChatGPT</option>
+                <option value="gemini">Google Gemini</option>
+              </select>
               <input
                 type="number"
                 min="1"
@@ -265,7 +275,7 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
                 disabled={bulkStatus.running}
                 placeholder="All conversations"
                 data-testid="bulk-limit-input"
-                className="w-40 rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-40"
+                className="w-32 rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-40"
               />
               {bulkStatus.running ? (
                 <button
