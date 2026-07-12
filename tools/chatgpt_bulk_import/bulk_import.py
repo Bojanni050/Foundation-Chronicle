@@ -99,6 +99,12 @@ def import_conversation(provider, page, url, title_hint, api_url, token):
 
 
 def main():
+    if sys.stdout.encoding.lower() != 'utf-8':
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(description="Bulk-import conversation history into Chronicle.")
     parser.add_argument("--api-url", default="http://127.0.0.1:4577")
     parser.add_argument("--token", default=None, help="Chronicle API token (defaults to server/data/token.txt)")
