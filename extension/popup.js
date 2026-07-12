@@ -172,8 +172,18 @@ async function scrapeConversation(provider) {
     if (dutchDate) {
       const monthIdx = MONTHS.findIndex((m) => m.startsWith(dutchDate[2]));
       if (monthIdx !== -1) {
+        const day = parseInt(dutchDate[1], 10);
         const year = dutchDate[3] ? parseInt(dutchDate[3], 10) : now.getFullYear();
-        return withTime(new Date(year, monthIdx, parseInt(dutchDate[1], 10)));
+        let candidate = new Date(year, monthIdx, day);
+        // No year in the label means "assume current year" — but ChatGPT
+        // never shows a future date, so a year-less label scraped in, say,
+        // January for "31 december" can only mean last December, not one
+        // that hasn't happened yet. Roll back a year when that assumption
+        // would otherwise land in the future.
+        if (!dutchDate[3] && candidate.getTime() > now.getTime()) {
+          candidate = new Date(year - 1, monthIdx, day);
+        }
+        return withTime(candidate);
       }
     }
 

@@ -89,7 +89,15 @@ def parse_relative_date_label(label, now=None):
         month_idx = next((i for i, mm in enumerate(MONTHS_NL) if mm.startswith(m.group(2))), None)
         if month_idx is not None:
             year = int(m.group(3)) if m.group(3) else now.year
-            return with_time(datetime(year, month_idx + 1, day))
+            candidate = datetime(year, month_idx + 1, day)
+            # No year in the label means "assume current year" - but ChatGPT
+            # never shows a future date, so a year-less label scraped in,
+            # say, January for "31 december" can only mean last December,
+            # not one that hasn't happened yet. Roll back a year when that
+            # assumption would otherwise land in the future.
+            if not m.group(3) and candidate > now:
+                candidate = datetime(year - 1, month_idx + 1, day)
+            return with_time(candidate)
 
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%B %d, %Y", "%b %d, %Y"):
         try:
