@@ -39,6 +39,33 @@ function clearPid() {
 // every subsequent "hermes gateway run --replace" fail with an "already
 // running" conflict forever — an infinite 3s restart loop. Killing by port
 // is the only thing that reliably frees it.
+// Only python.exe/pythonw.exe (the actual gateway process, per the comment
+// above) or hermes.exe (its launcher) are ever legitimately ours on this
+// port. Blindly killing whatever's listening — the previous behavior — is
+// dangerous the moment something unrelated happens to be squatting on 9120:
+// it would be silently killed with zero warning. Unrecognized processes are
+// left alone and surfaced as a warning instead.
+const HERMES_PROCESS_NAMES = new Set(["python.exe", "pythonw.exe", "hermes.exe"]);
+
+function isHermesProcessWindows(pid) {
+  try {
+    const out = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { encoding: "utf8" });
+    const match = out.match(/^"([^"]+)"/);
+    return !!match && HERMES_PROCESS_NAMES.has(match[1].toLowerCase());
+  } catch {
+    return false; // couldn't identify it — safer to assume it's not ours
+  }
+}
+
+function isHermesProcessUnix(pid) {
+  try {
+    const comm = execSync(`ps -p ${pid} -o comm=`, { encoding: "utf8" }).trim().toLowerCase();
+    return comm.includes("python") || comm.includes("hermes");
+  } catch {
+    return false;
+  }
+}
+
 function killProcessOnPort(port) {
   try {
     if (process.platform === "win32") {
@@ -53,12 +80,20 @@ function killProcessOnPort(port) {
         if (pid && !isNaN(parseInt(pid, 10))) pids.add(pid);
       }
       for (const pid of pids) {
+        if (!isHermesProcessWindows(pid)) {
+          console.warn(`[Gaia-Hermes] Port ${port} is held by an unrecognized process (PID ${pid}) — leaving it alone. If Hermes fails to start, free the port manually.`);
+          continue;
+        }
         console.log(`[Gaia-Hermes] Killing orphaned process on port ${port} (PID ${pid})...`);
         try { execSync(`taskkill /pid ${pid} /f /t`, { stdio: "ignore" }); } catch { /* already gone */ }
       }
     } else {
       const out = execSync(`lsof -ti tcp:${port}`, { encoding: "utf8" }).trim();
       for (const pid of out.split("\n").filter(Boolean)) {
+        if (!isHermesProcessUnix(pid)) {
+          console.warn(`[Gaia-Hermes] Port ${port} is held by an unrecognized process (PID ${pid}) — leaving it alone. If Hermes fails to start, free the port manually.`);
+          continue;
+        }
         console.log(`[Gaia-Hermes] Killing orphaned process on port ${port} (PID ${pid})...`);
         try { process.kill(parseInt(pid, 10), "SIGKILL"); } catch { /* already gone */ }
       }
