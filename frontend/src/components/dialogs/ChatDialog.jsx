@@ -69,7 +69,25 @@ function ChatPane({ tabId, isGaia, specialistName, onSendMessage, messages, send
   };
 
   const handleSuggestion = (suggestion) => {
-    onSendMessage(tabId, suggestion);
+    let textToSend = suggestion;
+    const lower = suggestion.toLowerCase();
+    
+    if (lower.startsWith("wil je ") || lower.startsWith("zal ik ") || lower.endsWith("?")) {
+      let core = suggestion;
+      if (lower.startsWith("wil je ")) core = core.substring(7);
+      else if (lower.startsWith("zal ik ")) core = core.substring(7);
+      
+      if (core.endsWith("?")) core = core.substring(0, core.length - 1);
+      
+      core = core.trim();
+      if (core.length > 0) {
+        core = core.charAt(0).toLowerCase() + core.slice(1);
+      }
+      
+      textToSend = `Ja graag, ${core}.`;
+    }
+    
+    onSendMessage(tabId, textToSend);
   };
 
   const placeholder = sending
