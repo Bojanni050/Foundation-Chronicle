@@ -1,4 +1,5 @@
 const { spawn, execSync } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 const { TOKEN } = require("./auth");
 
@@ -42,10 +43,36 @@ function getStatus() {
   };
 }
 
+// spawn()'s ENOENT for a missing executable surfaces via the async 'error'
+// event, which fires on a later tick than spawn() itself returns — by then
+// startBulkImport would already have sent {started: true} back to the
+// caller. Checking upfront lets a missing interpreter/script fail
+// immediately and honestly instead of reporting fake success first.
+function preflightCheck() {
+  if (!fs.existsSync(SCRIPT_PATH)) {
+    return `bulk_import.py not found at ${SCRIPT_PATH}`;
+  }
+  if (!TOKEN) {
+    return "no Chronicle API token available";
+  }
+  try {
+    execSync("python --version", { stdio: "ignore" });
+  } catch {
+    return "python not found on PATH — see tools/chatgpt_bulk_import/README.md";
+  }
+  return null;
+}
+
 async function startBulkImport({ limit, headless } = {}) {
   if (importProcess || starting) {
     return { started: false, reason: "already_running" };
   }
+
+  const preflightError = preflightCheck();
+  if (preflightError) {
+    return { started: false, reason: preflightError };
+  }
+
   starting = true;
 
   try {

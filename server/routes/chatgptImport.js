@@ -14,8 +14,16 @@ router.get("/status", (_req, res) => {
 // POST /api/settings/chatgpt-import/start  { limit?: number, headless?: boolean }
 router.post("/start", async (req, res) => {
   const { limit, headless } = req.body || {};
+  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+    return res.status(400).json({ error: "limit must be a positive integer" });
+  }
+  if (headless !== undefined && typeof headless !== "boolean") {
+    return res.status(400).json({ error: "headless must be a boolean" });
+  }
   const result = await startBulkImport({ limit, headless });
-  if (!result.started) return res.status(409).json(result);
+  if (!result.started) {
+    return res.status(result.reason === "already_running" ? 409 : 400).json(result);
+  }
   res.json(result);
 });
 
