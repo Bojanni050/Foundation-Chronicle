@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare, Lock, Unlock, Eye, Pencil, Paperclip, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare, Lock, Unlock, Eye, Pencil, Paperclip, X, ChevronLeft, ChevronRight } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { objectRepository } from "@/repositories";
@@ -116,7 +117,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
   const [locked, setLocked] = useState(!!object.locked);
   const [lockBusy, setLockBusy] = useState(false);
   const [preview, setPreview] = useState(!!(object.title || object.content));
-  const [lightboxImage, setLightboxImage] = useState(null);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
   const timer = useRef(null);
   const idRef = useRef(object.id);
   const pending = useRef({});
@@ -143,7 +144,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
     setLocked(!!object.locked);
     const isNew = !object.title && !object.content;
     setPreview(!isNew);
-    setLightboxImage(null);
+    setLightboxIndex(null);
     // content-first capture: a fresh, empty entry drops the cursor straight
     // into the writing surface — no type to pick first.
     if (isNew) {
@@ -217,6 +218,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
   const meta = typeMeta(type);
   const { apiUrl } = getSettings();
   const attachments = object.attachments || [];
+  const imageAttachments = attachments.filter((att) => (att.mimeType || "").startsWith("image/"));
 
   return (
     <div className="mx-auto flex h-full w-full max-w-2xl flex-col px-10 pt-10 pb-6 rise-in" data-testid="object-detail">
@@ -290,7 +292,8 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
                 href={href}
                 onClick={(e) => {
                   e.preventDefault();
-                  setLightboxImage(href);
+                  const idx = imageAttachments.findIndex((img) => img.id === att.id);
+                  if (idx !== -1) setLightboxIndex(idx);
                 }}
                 target="_blank"
                 rel="noreferrer"
@@ -489,24 +492,51 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
         </div>
       </div>
 
-      {lightboxImage && (
+      {lightboxIndex !== null && imageAttachments[lightboxIndex] && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 fade-in"
-          onClick={() => setLightboxImage(null)}
+          className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/90 backdrop-blur-sm p-4 fade-in"
+          onClick={() => setLightboxIndex(null)}
         >
-          <button
-            className="absolute top-4 right-4 rounded-full bg-black/50 p-2 text-white hover:bg-black/70 transition-colors"
-            onClick={() => setLightboxImage(null)}
-          >
-            <X className="w-6 h-6" />
-          </button>
-          <img
-            src={lightboxImage}
-            alt="Enlarged attachment"
-            className="max-h-full max-w-full rounded-md object-contain shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
+          <div className="absolute top-0 left-0 right-0 flex justify-between items-center p-4 z-10 bg-gradient-to-b from-black/60 to-transparent">
+            <div className="text-white/90 text-sm font-medium px-2 drop-shadow-md">
+              {imageAttachments[lightboxIndex].filename}
+            </div>
+            <button
+              className="rounded-full bg-black/50 p-2 text-white hover:bg-black/70 transition-colors"
+              onClick={() => setLightboxIndex(null)}
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          
+          <div className="relative flex-1 w-full flex items-center justify-center min-h-0 py-12">
+            {lightboxIndex > 0 && (
+              <button
+                className="absolute left-4 z-10 rounded-full bg-black/50 p-2 text-white hover:bg-black/70 transition-colors"
+                onClick={(e) => { e.stopPropagation(); setLightboxIndex(lightboxIndex - 1); }}
+              >
+                <ChevronLeft className="w-8 h-8" />
+              </button>
+            )}
+
+            <img
+              src={`${apiUrl}${imageAttachments[lightboxIndex].url}`}
+              alt={imageAttachments[lightboxIndex].filename}
+              className="max-h-full max-w-full rounded-md object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+
+            {lightboxIndex < imageAttachments.length - 1 && (
+              <button
+                className="absolute right-4 z-10 rounded-full bg-black/50 p-2 text-white hover:bg-black/70 transition-colors"
+                onClick={(e) => { e.stopPropagation(); setLightboxIndex(lightboxIndex + 1); }}
+              >
+                <ChevronRight className="w-8 h-8" />
+              </button>
+            )}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
