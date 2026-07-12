@@ -21,6 +21,16 @@ router.post("/reflectie", async (req, res) => {
 
     // 1. Process creations
     for (const c of creations) {
+      // LLM-produced (AIService.reflectTemporalBeliefs) — a required field can be
+      // missing from a hallucinated/malformed entry, and this whole loop shares one
+      // transaction, so an un-validated bad row would take every other valid
+      // creation/update in the same batch down with it via ROLLBACK. Skip just the
+      // bad one instead.
+      if (typeof c.kenmerk !== "string" || !c.kenmerk.trim()) {
+        console.error("Temporal reflection: skipping creation with missing/empty kenmerk:", c);
+        continue;
+      }
+
       const soortValue = c.soort === "feit" ? "feit" : "patroon";
       const instelling = await getOrCreateInstelling();
       const { zekerheid, status } = computePromotion(
