@@ -61,6 +61,7 @@ export async function chatWithGaia(messages, sessionId = null, hermesCallbacks =
       instructions:
         "You are Gaia, Chronicle's helpful, context-aware AI assistant — a local-first personal knowledge app. " +
         "Maintain a supportive, clear, and highly professional tone. " +
+        "IMPORTANT: When using search_files or any tool expecting a regular expression, do NOT use glob patterns like `*.js`. Always use valid regex like `.*\\.js` to avoid parse errors. " +
         "At the very end of your response, always propose exactly 2 or 3 short, contextually relevant follow-up " +
         "questions, formatted exactly like this: [Doorvragen: Vraag 1 | Vraag 2 | Vraag 3]. Do not put any other " +
         "text after this brackets block.",
@@ -116,6 +117,7 @@ export async function chatWithGaia(messages, sessionId = null, hermesCallbacks =
           .join(", ")}. Delegate to them for focused, topic-specific questions rather than answering from general knowledge.\n\n`
       : "") +
     "Maintain a supportive, clear, and highly professional tone.\n\n" +
+    "IMPORTANT: When using search_files or any tool expecting a regular expression, do NOT use glob patterns like `*.js`. Always use valid regex like `.*\\.js` to avoid parse errors.\n\n" +
     "IMPORTANT: At the very end of your response, always propose exactly 2 or 3 short, contextually relevant follow-up questions for the user to explore next. " +
     "Format them exactly like this: [Doorvragen: Vraag 1 | Vraag 2 | Vraag 3]. " +
     "Example: '[Doorvragen: Kun je een codevoorbeeld geven? | Waarom is dit lokaal-first? | Wat zijn de alternatieven?]'. " +
