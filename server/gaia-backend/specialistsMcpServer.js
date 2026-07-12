@@ -14,8 +14,10 @@
 // OpenRouter key, which only ever lives in the browser and was never meant
 // to be duplicated server-side.
 const express = require("express");
-const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
+const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
+const { CallToolRequestSchema, ListToolsRequestSchema } = require("@modelcontextprotocol/sdk/types.js");
 const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
+const crypto = require("crypto");
 const { z } = require("zod");
 const { pool } = require("../db");
 const { getGaiaHermesConfig } = require("./gaiaHermesManager");
@@ -61,47 +63,44 @@ async function askSpecialist(specialist, question) {
   return data.choices?.[0]?.message?.content || "(geen antwoord)";
 }
 
-// A fresh McpServer + tool registration per request — cheap (no long-lived
-// state), and guarantees ListTools always reflects the current confirmed set.
-async function buildServer() {
-  const server = new McpServer({ name: "chronicle-specialists", version: "1.0.0" });
-  const specialists = await getConfirmedSpecialists();
-  for (const s of specialists) {
-    const toolName = `ask_${slugify(s.onderwerp)}_specialist`;
-    server.registerTool(
-      toolName,
-      {
-        description: `Ask a specialist focused on "${s.onderwerp}" a specific question. Use this instead of guessing when the question is specifically about ${s.onderwerp}.`,
-        inputSchema: { question: z.string().describe("The focused question to hand to the specialist.") },
-      },
-      async ({ question }) => {
-        try {
-          const answer = await askSpecialist(s, question);
-          return { content: [{ type: "text", text: answer }] };
-        } catch (err) {
-          return { content: [{ type: "text", text: `De specialist-aanroep faalde: ${err.message}` }], isError: true };
-        }
-      }
-    );
-  }
-  return server;
-}
+// Global stateful transport and server. We handle dynamic tools by intercepting
+// ListToolsRequestSchema instead of rebuilding the transport per-request.
+const server = new Server({ name: "chronicle-specialists", version: "1.0.0" }, { capabilities: { tools: {} } });
+const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => crypto.randomUUID() });
 
-// Stateless streamable-HTTP MCP endpoint (sessionIdGenerator: undefined —
-// no session state to keep, matches the "fresh tool list every call" design
-// above). Mounted at /mcp/specialists in index.js.
-router.post("/", async (req, res) => {
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  const specialists = await getConfirmedSpecialists();
+  return {
+    tools: specialists.map(s => ({
+      name: `ask_${slugify(s.onderwerp)}_specialist`,
+      description: `Ask a specialist focused on "${s.onderwerp}" a specific question. Use this instead of guessing when the question is specifically about ${s.onderwerp}.`,
+      inputSchema: { type: "object", properties: { question: { type: "string", description: "The focused question to hand to the specialist." } }, required: ["question"] }
+    }))
+  };
+});
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  const specialists = await getConfirmedSpecialists();
+  const s = specialists.find(s => `ask_${slugify(s.onderwerp)}_specialist` === name);
+  if (!s) return { content: [{ type: "text", text: `Unknown specialist: ${name}` }], isError: true };
+  
   try {
-    const server = await buildServer();
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    res.on("close", () => {
-      transport.close();
-      server.close();
-    });
-    await server.connect(transport);
-    // No parsedBody: this router is mounted before express.json() runs (see
-    // index.js), specifically so the transport can read the raw request
-    // stream itself instead of racing an already-consumed one.
+    const answer = await askSpecialist(s, args?.question);
+    return { content: [{ type: "text", text: answer }] };
+  } catch (err) {
+    return { content: [{ type: "text", text: `De specialist-aanroep faalde: ${err.message}` }], isError: true };
+  }
+});
+
+server.connect(transport).catch(err => {
+  console.error("[Specialists-MCP] server connection error:", err.message);
+});
+
+// Mounted at /mcp/specialists in index.js.
+// Using router.all() so GET (for SSE stream) and POST (for messages) are both passed to the transport.
+router.all("/", async (req, res) => {
+  try {
     await transport.handleRequest(req, res);
   } catch (err) {
     console.error("[Specialists-MCP] request failed:", err.message);
