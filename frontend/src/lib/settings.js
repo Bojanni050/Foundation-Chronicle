@@ -38,6 +38,7 @@ const DEFAULTS = {
   // split for the same defense-in-depth reason.
   uiaCaptureEnabled: false,
   uiaCaptureText: false,
+  uiaCaptureOcrFallback: false,
   models: {
     tagging: DEFAULT_MODEL,
     weave: DEFAULT_MODEL,

@@ -1,0 +1,9 @@
+2026/07/12-08:41:35.026 c4bc Reusing MANIFEST C:\Users\bojan\Projects\Foundation-Chronicle\tools\chatgpt_bulk_import\.gemini_profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/07/12-08:41:35.051 c4bc Recovering log #3
+2026/07/12-08:41:35.058 c4bc Reusing old log C:\Users\bojan\Projects\Foundation-Chronicle\tools\chatgpt_bulk_import\.gemini_profile\Default\Local Storage\leveldb/000003.log 
+2026/07/12-09:20:34.960 bb34 Level-0 table #5: started
+2026/07/12-09:20:34.970 bb34 Level-0 table #5: 9051 bytes OK
+2026/07/12-09:20:34.976 bb34 Delete type=0 #3
+2026/07/12-10:45:08.425 bb34 Level-0 table #7: started
+2026/07/12-10:45:08.430 bb34 Level-0 table #7: 8698 bytes OK
+2026/07/12-10:45:08.435 bb34 Delete type=0 #4

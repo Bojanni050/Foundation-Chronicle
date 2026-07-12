@@ -27,6 +27,7 @@ const specialistRouter = require("./routes/specialist");
 const gaiaHermesProxyRouter = require("./routes/gaiaHermesProxy");
 const chatgptImportRouter = require("./routes/chatgptImport");
 const attachmentsRouter = require("./routes/attachments");
+const connectorsRouter = require("./routes/connectors");
 
 const HOST = "127.0.0.1"; // localhost-only — never 0.0.0.0
 const PORT = process.env.CHRONICLE_PORT || 4577;
@@ -76,6 +77,7 @@ app.use("/api/objects", embeddingRouter); // POST /api/objects/:objectId/embed
 app.use("/api/settings/gaia-hermes", gaiaHermesProxyRouter);
 app.use("/api/settings/chatgpt-import", chatgptImportRouter);
 app.use("/api/attachments", attachmentsRouter);
+app.use("/api/connectors", connectorsRouter);
 
 // Extension → queue a chat object
 app.post("/api/objects/import", requireAuth, (req, res) => {

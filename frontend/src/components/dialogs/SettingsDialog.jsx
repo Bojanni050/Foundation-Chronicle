@@ -179,7 +179,7 @@ export function SettingsDialog({ open, onOpenChange }) {
   const toggleUiaCapture = async (enabled) => {
     update({ uiaCaptureEnabled: enabled });
     if (enabled) {
-      await invokeTauri("start_uia_capture", { includeText: !!s.uiaCaptureText });
+      await invokeTauri("start_uia_capture", { includeText: !!s.uiaCaptureText, ocrFallback: !!s.uiaCaptureOcrFallback });
       await startUiaCaptureListener();
     } else {
       await invokeTauri("stop_uia_capture");
@@ -190,9 +190,14 @@ export function SettingsDialog({ open, onOpenChange }) {
   const toggleUiaCaptureText = (enabled) => {
     update({ uiaCaptureText: enabled });
     if (s.uiaCaptureEnabled) {
-      // start_uia_capture is idempotent while already running — it just
-      // updates the include-text flag on the live capture thread in place.
-      invokeTauri("start_uia_capture", { includeText: enabled });
+      invokeTauri("start_uia_capture", { includeText: enabled, ocrFallback: !!s.uiaCaptureOcrFallback });
+    }
+  };
+
+  const toggleUiaCaptureOcrFallback = (enabled) => {
+    update({ uiaCaptureOcrFallback: enabled });
+    if (s.uiaCaptureEnabled) {
+      invokeTauri("start_uia_capture", { includeText: !!s.uiaCaptureText, ocrFallback: enabled });
     }
   };
 
@@ -410,6 +415,24 @@ export function SettingsDialog({ open, onOpenChange }) {
                 Off by default: reads text from the on-screen text/edit/document elements of the focused window
                 (e.g. an address bar, a text editor's content). Anything shaped like a password (a token with
                 mixed case, digits, and symbols) is redacted before it ever leaves the capture module.
+              </p>
+            </div>
+
+            <div className="pt-1 space-y-1.5 pl-6">
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  data-testid="uia-capture-ocr-toggle"
+                  checked={!!s.uiaCaptureOcrFallback}
+                  onChange={(e) => toggleUiaCaptureOcrFallback(e.target.checked)}
+                  disabled={!s.uiaCaptureText}
+                  className="h-4 w-4 rounded border-border"
+                />
+                Use Native OCR fallback for non-text apps
+              </label>
+              <p className="text-[11px] text-muted-foreground/70">
+                If the active app yields no text via UIA (like videos or games), Chronicle will briefly take a
+                memory-only screenshot and use Windows' built-in OCR to extract the text. Fast and 100% local.
               </p>
             </div>
 

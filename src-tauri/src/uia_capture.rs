@@ -203,7 +203,7 @@ fn capture_foreground(automation: &IUIAutomation, include_text: bool) -> Option<
     let window_title = get_window_text(hwnd);
     let app_name = get_process_name(hwnd).unwrap_or_else(|| "unknown".to_string());
 
-    let captured_text = if include_text {
+    let mut captured_text = if include_text {
         match unsafe { automation.ElementFromHandle(hwnd) } {
             Ok(root) => walk_visible_text(automation, &root),
             Err(_) => Vec::new(),
@@ -211,6 +211,13 @@ fn capture_foreground(automation: &IUIAutomation, include_text: bool) -> Option<
     } else {
         Vec::new()
     };
+
+    let ocr_fallback = OCR_FALLBACK.load(Ordering::Relaxed);
+    if include_text && ocr_fallback && captured_text.is_empty() {
+        if let Some(ocr_lines) = crate::ocr_capture::capture_hwnd_ocr(hwnd) {
+            captured_text = ocr_lines;
+        }
+    }
 
     Some(UiaCapturePayload {
         app_name,
@@ -227,6 +234,7 @@ fn capture_foreground(automation: &IUIAutomation, include_text: bool) -> Option<
 static CAPTURE_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 static CAPTURE_RUNNING: AtomicBool = AtomicBool::new(false);
 static INCLUDE_TEXT: AtomicBool = AtomicBool::new(false);
+static OCR_FALLBACK: AtomicBool = AtomicBool::new(false);
 // WinEventProc has no user-data parameter, so the AppHandle has to live
 // somewhere the free-function callback can reach — set once right before
 // entering the message loop on the capture thread itself.
@@ -296,13 +304,15 @@ fn do_capture() {
 
 /// Starts the dedicated capture thread. Idempotent — a second call while
 /// already running is a no-op rather than spawning a duplicate hook.
-pub fn start(app: AppHandle, include_text: bool) {
+pub fn start(app: AppHandle, include_text: bool, ocr_fallback: bool) {
     if CAPTURE_RUNNING.swap(true, Ordering::SeqCst) {
         // Already running — just update the text-capture flag in place.
         INCLUDE_TEXT.store(include_text, Ordering::Relaxed);
+        OCR_FALLBACK.store(ocr_fallback, Ordering::Relaxed);
         return;
     }
     INCLUDE_TEXT.store(include_text, Ordering::Relaxed);
+    OCR_FALLBACK.store(ocr_fallback, Ordering::Relaxed);
     if let Ok(mut guard) = APP_HANDLE.lock() {
         *guard = Some(app);
     }
@@ -418,8 +428,8 @@ pub fn stop() {
 }
 
 #[tauri::command]
-pub fn start_uia_capture(app: AppHandle, include_text: bool) {
-    start(app, include_text);
+pub fn start_uia_capture(app: AppHandle, include_text: bool, ocr_fallback: bool) {
+    start(app, include_text, ocr_fallback);
 }
 
 #[tauri::command]

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
+mod ocr_capture;
 mod uia_capture;
 use uia_capture::{start_uia_capture, stop_uia_capture};
 
