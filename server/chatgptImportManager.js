@@ -9,12 +9,8 @@ const CHRONICLE_PORT = process.env.CHRONICLE_PORT || 4577;
 let importProcess = null;
 let startedAt = null;
 let lastStoppedAt = 0;
-// Set synchronously (before the first `await`) at the top of
-// startBulkImport, so two near-simultaneous start requests can't both pass
-// the "nothing running yet" check during the grace-period wait below —
-// importProcess alone isn't set until spawn() actually happens, which is on
-// the far side of that wait.
-let starting = false;
+let status = "idle"; // "idle" | "starting" | "running" | "stopping" | "exited"
+let activeRunId = null;
 
 // Windows' taskkill /f /t returns as soon as the process tree is signalled,
 // not necessarily once Chrome has fully released the persistent profile
@@ -37,7 +33,8 @@ function pushLogLine(stream, text) {
 
 function getStatus() {
   return {
-    running: !!importProcess || starting,
+    running: status === "starting" || status === "running" || status === "stopping",
+    status,
     startedAt,
     lines: recentLogLines,
   };
@@ -64,7 +61,7 @@ function preflightCheck() {
 }
 
 async function startBulkImport({ limit, headless } = {}) {
-  if (importProcess || starting) {
+  if (status !== "idle" && status !== "exited") {
     return { started: false, reason: "already_running" };
   }
 
@@ -73,7 +70,9 @@ async function startBulkImport({ limit, headless } = {}) {
     return { started: false, reason: preflightError };
   }
 
-  starting = true;
+  status = "starting";
+  const runId = Date.now().toString();
+  activeRunId = runId;
 
   try {
     const sinceStop = Date.now() - lastStoppedAt;
@@ -81,10 +80,17 @@ async function startBulkImport({ limit, headless } = {}) {
       await new Promise((resolve) => setTimeout(resolve, RESTART_GRACE_MS - sinceStop));
     }
 
+    if (activeRunId !== runId || status === "stopping") {
+        if (activeRunId === runId) {
+            status = "exited";
+            activeRunId = null;
+        }
+        return { started: false, reason: "stopped_before_spawn" };
+    }
+
     recentLogLines = [];
     const args = [
-      "-u", // unbuffered stdout — otherwise Python batches lines and the
-      // frontend's log poll would see nothing until the process exits.
+      "-u", // unbuffered stdout
       SCRIPT_PATH,
       "--api-url", `http://127.0.0.1:${CHRONICLE_PORT}`,
       "--token", TOKEN,
@@ -93,17 +99,12 @@ async function startBulkImport({ limit, headless } = {}) {
     if (headless) args.push("--headless");
 
     pushLogLine("stdout", `Starting bulk import (limit=${limit || "all"}, headless=${!!headless})...`);
-    // Captured in this closure so the event handlers below can check "is
-    // this still the current run" by identity — importProcess (the shared,
-    // module-level slot) can already point at a *different*, newer run by
-    // the time an old process's event fires (e.g. a stale "exit" arriving
-    // after Stop was immediately followed by Start). Only the run's own
-    // handlers may clear the shared slot, and only if it's still pointing
-    // at them.
+    
     const child = spawn("python", args, {
-      shell: process.platform === "win32", // resolve "python" from PATH, same as gaiaHermesManager
+      shell: process.platform === "win32",
     });
     importProcess = child;
+    status = "running";
     startedAt = new Date().toISOString();
 
     let stdoutBuffer = "";
@@ -121,37 +122,63 @@ async function startBulkImport({ limit, headless } = {}) {
       stderrBuffer = lines.pop() || "";
       lines.filter(Boolean).forEach((line) => pushLogLine("stderr", line));
     });
+    
     child.on("error", (err) => {
       pushLogLine("stderr", `Failed to start: ${err.message}`);
-      if (importProcess === child) importProcess = null;
+      if (activeRunId === runId) {
+          status = "exited";
+          importProcess = null;
+          lastStoppedAt = Date.now();
+      }
     });
+    
     child.on("exit", (code, signal) => {
       if (stdoutBuffer) pushLogLine("stdout", stdoutBuffer);
       if (stderrBuffer) pushLogLine("stderr", stderrBuffer);
       pushLogLine("stdout", `Process exited (code=${code}, signal=${signal}).`);
-      if (importProcess === child) importProcess = null;
+      
+      if (activeRunId === runId) {
+          status = "exited";
+          importProcess = null;
+          lastStoppedAt = Date.now();
+      }
     });
 
     return { started: true };
-  } finally {
-    starting = false;
+  } catch (err) {
+      if (activeRunId === runId) {
+          status = "exited";
+          activeRunId = null;
+      }
+      return { started: false, reason: err.message };
   }
 }
 
 function stopBulkImport() {
-  if (!importProcess) return { stopped: false, reason: "not_running" };
-  const pid = importProcess.pid;
-  pushLogLine("stdout", "Stopping bulk import...");
-  if (process.platform === "win32") {
-    // taskkill on the whole tree — the spawned "python" (via shell:true) and
-    // the browser it drives both need to go, same reasoning as
-    // gaiaHermesManager.stopGaiaHermes.
-    try { execSync(`taskkill /pid ${pid} /f /t`, { stdio: "ignore" }); } catch { /* already gone */ }
-  } else {
-    try { importProcess.kill("SIGTERM"); } catch { /* already gone */ }
+  if (status !== "starting" && status !== "running") {
+      return { stopped: false, reason: "not_running" };
   }
-  importProcess = null;
-  lastStoppedAt = Date.now();
+  
+  const pid = importProcess ? importProcess.pid : null;
+  status = "stopping";
+  pushLogLine("stdout", "Stopping bulk import...");
+  
+  if (pid) {
+      if (process.platform === "win32") {
+        try { execSync(`taskkill /pid ${pid} /f /t`, { stdio: "ignore" }); } catch { /* already gone */ }
+      } else {
+        try { importProcess.kill("SIGTERM"); } catch { /* already gone */ }
+      }
+  } else {
+      // If there was no PID, it was stopped before it spawned.
+      // We still update the state properly.
+      status = "exited";
+      activeRunId = null;
+      lastStoppedAt = Date.now();
+  }
+  
+  // Notice we DO NOT set importProcess = null or status = "exited" here (if a PID existed).
+  // The 'exit' handler of the child process will handle that when the process tree actually dies.
   return { stopped: true };
 }
 
