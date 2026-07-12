@@ -19,7 +19,7 @@ class GeminiProvider(BaseProvider):
 
     @property
     def start_url(self) -> str:
-        return "https://gemini.google.com/app"
+        return "https://gemini.google.com"
 
     def is_logged_in(self, page) -> bool:
         try:
