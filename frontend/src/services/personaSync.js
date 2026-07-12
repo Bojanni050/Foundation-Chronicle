@@ -216,8 +216,17 @@ export async function detectPersonaKenmerken(limit = 30) {
   }
 }
 
-/** Runs the temporal reflection process — how kenmerken evolved over time. */
-export async function reflecteerOverTijd() {
+/**
+ * Runs the temporal reflection process — how kenmerken evolved over time.
+ * `sinceIso`, if given, restricts the scan to objects touched since that
+ * timestamp — used by the automatic background run (see
+ * runAutomaticPersonaMaintenance below) so it only re-reflects on what's
+ * actually new since the last automatic pass, rather than re-scanning every
+ * temporal object on every run. The manual "Temporal reflection" button in
+ * PersonaDialog always calls this with no argument — a full scan, since
+ * that's what clicking it explicitly asks for.
+ */
+export async function reflecteerOverTijd(sinceIso) {
   const { apiUrl } = getSettings();
   if (!apiUrl || !AIService.isConfigured()) return { success: false, reason: "NOT_CONFIGURED" };
   try {
@@ -227,9 +236,12 @@ export async function reflecteerOverTijd() {
     ]);
 
     // 1. Filter objects that have temporal metadata
-    const temporalObjects = allObjects.filter(
+    let temporalObjects = allObjects.filter(
       (o) => o.occurredAt || o.validFrom || o.validTo || o.temporalText
     );
+    if (sinceIso) {
+      temporalObjects = temporalObjects.filter((o) => (o.updatedAt || o.createdAt || "") > sinceIso);
+    }
 
     if (temporalObjects.length === 0) {
       return { success: false, reason: "NO_TEMPORAL_DATA" };
@@ -269,4 +281,37 @@ export async function reflecteerOverTijd() {
     console.error("reflecteerOverTijd error:", err);
     return { success: false, reason: err.message || "ERROR" };
   }
+}
+
+// Timestamp of the last automatic (not manual-button) reflection run, so
+// runAutomaticPersonaMaintenance can pass it as reflecteerOverTijd's
+// sinceIso — see that function's doc comment for why.
+const LAST_AUTO_REFLECTION_KEY = "chronicle_last_auto_temporal_reflection_at";
+
+/**
+ * Periodic background counterpart to PersonaDialog's manual "Detect
+ * patterns" / "Temporal reflection" buttons — called on a timer from
+ * App.js. Safe to call often: detectPersonaKenmerken() already only does
+ * LLM work for objects it hasn't scanned yet (its own processedAt
+ * watermark), and reflection is scoped to what changed since the last
+ * automatic run via LAST_AUTO_REFLECTION_KEY — both are cheap no-ops when
+ * there's nothing new, so the actual cadence naturally lands somewhere
+ * between "every tick" and "only after a burst of new material", without
+ * this function needing its own separate scheduling logic.
+ */
+export async function runAutomaticPersonaMaintenance() {
+  if (!AIService.isConfigured()) return { detected: 0, reflected: 0 };
+
+  const detected = await detectPersonaKenmerken();
+
+  const sinceIso = localStorage.getItem(LAST_AUTO_REFLECTION_KEY) || undefined;
+  const res = await reflecteerOverTijd(sinceIso);
+  if (res.success) {
+    localStorage.setItem(LAST_AUTO_REFLECTION_KEY, new Date().toISOString());
+  }
+
+  return {
+    detected: typeof detected === "number" && detected > 0 ? detected : 0,
+    reflected: res.success && res.reflectionsCount > 0 ? res.reflectionsCount : 0,
+  };
 }

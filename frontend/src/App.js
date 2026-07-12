@@ -6,6 +6,7 @@ import { LoginScreen } from "@/components/LoginScreen";
 import { objectRepository } from "@/repositories";
 import { getSettings } from "@/lib/settings";
 import { pollInbox } from "@/services/inboxSync";
+import { runAutomaticPersonaMaintenance } from "@/services/personaSync";
 import { findRelatedLocal } from "@/services/weave";
 import { checkGaiaProactiveTopics } from "@/services/gaiaProactive";
 import { startUiaCaptureListener } from "@/services/uiaCapture";
@@ -113,6 +114,29 @@ export default function App() {
     };
     const id = setInterval(poll, 30000);
     poll();
+    return () => clearInterval(id);
+  }, []);
+
+  // Automatic persona pattern detection + temporal reflection — the
+  // background counterpart to PersonaDialog's manual buttons. Both
+  // underlying calls are self-gating (detection skips objects it's already
+  // scanned, reflection skips objects unchanged since the last automatic
+  // pass), so an LLM call only actually happens when there's real new
+  // material — no separate "N new objects" burst counter needed on top.
+  // 30 min keeps a bulk import from sitting unprocessed for too long
+  // without re-running often enough to matter when nothing's changed.
+  useEffect(() => {
+    const run = async () => {
+      const { detected, reflected } = await runAutomaticPersonaMaintenance();
+      if (detected > 0 || reflected > 0) {
+        const parts = [];
+        if (detected > 0) parts.push(`${detected} new pattern${detected === 1 ? "" : "s"}`);
+        if (reflected > 0) parts.push(`${reflected} temporal change${reflected === 1 ? "" : "s"}`);
+        toast.success(`Persona updated: ${parts.join(", ")}`);
+      }
+    };
+    const id = setInterval(run, 30 * 60 * 1000);
+    run();
     return () => clearInterval(id);
   }, []);
 
