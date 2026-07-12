@@ -42,9 +42,22 @@ async function getPipeline() {
   return pipelinePromise;
 }
 
+// No chunking strategy in this codebase caps chunk size before it reaches
+// here (routes/embedding.js sends one chunk per turn, whatever its length),
+// and the ONNX pipeline itself has no truncation/max_length option applied.
+// An unbroken blob of text (observed cause: a giant base64 data: URI that
+// slipped through from a pasted image) tokenizes far worse than its byte
+// length suggests — no whitespace for the tokenizer to split on — and once
+// blew a ~13GB attention-mask allocation, crashing the embedding pipeline
+// outright. This is the single choke point every embed() caller goes
+// through, so truncating here protects all of them at once rather than
+// requiring every call site to remember to cap its own input.
+const MAX_EMBED_CHARS = 8000;
+
 async function embed(text) {
   const extractor = await getPipeline();
-  const output = await extractor(text, { pooling: "mean", normalize: true });
+  const input = text.length > MAX_EMBED_CHARS ? text.slice(0, MAX_EMBED_CHARS) : text;
+  const output = await extractor(input, { pooling: "mean", normalize: true });
   return Array.from(output.data);
 }
 

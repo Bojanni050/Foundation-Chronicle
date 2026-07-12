@@ -23,6 +23,7 @@ imported.json (also not committed) and skipped on subsequent runs.
 """
 
 import argparse
+import base64
 import json
 import mimetypes
 import re
@@ -160,20 +161,26 @@ def post_attachment(api_url, token, data, filename, mime_type, retries=1):
             return None
 
 
-def download_and_upload_images(page, img_urls, api_url, token):
-    """Downloads each image via the page's own authenticated request context
-    (so signed/cookie-gated ChatGPT CDN URLs work the same as they do in the
-    browser) and re-uploads it to Chronicle's local attachment store. Returns
-    a list of attachment metadata dicts; failures are skipped, not fatal."""
+def download_and_upload_images(page, images, api_url, token):
+    """Fetches each image's bytes — via the page's own authenticated request
+    context for http(s) URLs (so signed/cookie-gated ChatGPT CDN URLs work
+    the same as they do in the browser), or straight from the already-
+    decoded bytes for a data: URI — and uploads it to Chronicle's local
+    attachment store. Returns a list of attachment metadata dicts; failures
+    are skipped, not fatal."""
     attachments = []
-    for i, src in enumerate(img_urls):
+    for i, img in enumerate(images):
         try:
-            resp = page.request.get(src, timeout=30000)
-            if not resp.ok:
-                print(f"    ! image download failed ({resp.status}): {src[:100]}")
-                continue
-            data = resp.body()
-            mime_type = resp.headers.get("content-type", "image/png").split(";")[0].strip()
+            if img["kind"] == "url":
+                resp = page.request.get(img["src"], timeout=30000)
+                if not resp.ok:
+                    print(f"    ! image download failed ({resp.status}): {img['src'][:100]}")
+                    continue
+                data = resp.body()
+                mime_type = resp.headers.get("content-type", "image/png").split(";")[0].strip()
+            else:
+                data = img["data"]
+                mime_type = img["mime_type"]
             ext = mimetypes.guess_extension(mime_type) or ".png"
             filename = f"image-{i + 1}{ext}"
             meta = post_attachment(api_url, token, data, filename, mime_type)
@@ -185,24 +192,47 @@ def download_and_upload_images(page, img_urls, api_url, token):
 
 
 def extract_and_strip_images(html):
-    """Pulls http(s) <img> src URLs out of a message's HTML and returns
-    (cleaned_html, [urls]). Images are represented as separate `attachments`
-    on the object (see ObjectDetail.jsx's attachment strip), not inlined
-    into the markdown text, so they're removed here rather than left for
-    markdownify to turn into a ![](...) pointing at a URL that will expire
-    once the browser session that has access to it is gone. data: URIs are
-    left alone (skipped, not stripped) — those are almost always small
-    decorative/icon images, not worth downloading."""
+    """Pulls <img> sources (http(s) URLs and inline data: URIs alike) out of
+    a message's HTML and returns (cleaned_html, [image_descriptors]).
+    Images are represented as separate `attachments` on the object (see
+    ObjectDetail.jsx's attachment strip), not inlined into the markdown
+    text.
+
+    data: URIs are ALWAYS stripped from the text (previously they were left
+    alone on the assumption they're small decorative icons — wrong: ChatGPT
+    inlines pasted screenshots the same way). An unbroken base64 blob has no
+    whitespace for a tokenizer to split on, so it produces far more tokens
+    than its byte length suggests; one of these survived into a chunk's text
+    and caused a ~13GB attention-mask allocation that crashed the embedding
+    worker entirely (chunking has no size cap — see server/embedding.js).
+    Ones under 2KB decoded are dropped rather than uploaded as an attachment
+    (genuinely trivial, e.g. an emoji glyph) — but still stripped from the
+    text either way, since that's what actually matters for the embedding
+    bug regardless of whether it's "worth" an attachment."""
     if "<img" not in html:
         return html, []
     soup = BeautifulSoup(html, "html.parser")
-    urls = []
+    images = []
     for img in soup.find_all("img"):
         src = img.get("src", "")
         if src.startswith("http://") or src.startswith("https://"):
-            urls.append(src)
-            img.decompose()
-    return str(soup), urls
+            images.append({"kind": "url", "src": src})
+        elif src.startswith("data:"):
+            match = re.match(r"data:([^;,]*)(;base64)?,(.*)", src, re.DOTALL)
+            if match:
+                mime_type = match.group(1) or "image/png"
+                try:
+                    data = (
+                        base64.b64decode(match.group(3))
+                        if match.group(2)
+                        else urllib.parse.unquote_to_bytes(match.group(3))
+                    )
+                    if len(data) > 2048:
+                        images.append({"kind": "data", "mime_type": mime_type, "data": data})
+                except Exception:
+                    pass  # malformed data URI — nothing to salvage, just drop it below
+        img.decompose()  # always strip <img> regardless of src kind or decode outcome
+    return str(soup), images
 
 
 def collect_conversation_links(page, limit=None):
@@ -409,14 +439,14 @@ def collect_turns(page):
         merge_in(snapshot())
 
     turns = []
-    image_urls = []
+    images = []
     for item in merged:
-        cleaned_html, urls = extract_and_strip_images(item["html"])
-        image_urls.extend(urls)
+        cleaned_html, item_images = extract_and_strip_images(item["html"])
+        images.extend(item_images)
         text = md(cleaned_html, heading_style="ATX", bullets="-").strip()
         if text:
             turns.append({"role": item["role"], "text": text})
-    return turns, last_date_label, image_urls
+    return turns, last_date_label, images
 
 
 def format_turns(turns):
@@ -431,7 +461,7 @@ def import_conversation(page, url, title_hint, api_url, token):
         print(f"  ! no messages found, skipping: {url}")
         return False
 
-    turns, last_date_label, image_urls = collect_turns(page)
+    turns, last_date_label, images = collect_turns(page)
     if not turns:
         print(f"  ! no turns extracted, skipping: {url}")
         return False
@@ -442,9 +472,9 @@ def import_conversation(page, url, title_hint, api_url, token):
         occurred_at = dt.isoformat() if dt else None
 
     attachments = []
-    if image_urls:
-        print(f"  downloading {len(image_urls)} image(s)...")
-        attachments = download_and_upload_images(page, image_urls, api_url, token)
+    if images:
+        print(f"  downloading {len(images)} image(s)...")
+        attachments = download_and_upload_images(page, images, api_url, token)
 
     content = format_turns(turns)
     # title_hint is ChatGPT's own conversation title, read from the sidebar
