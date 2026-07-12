@@ -23,9 +23,10 @@ python bulk_import.py --limit 3
 python bulk_import.py
 ```
 
-The first run opens a visible Chrome window at chatgpt.com. Log in there,
-then press Enter in the terminal to continue — the session is cached in
-`.chatgpt_profile/` (gitignored) so you won't need to log in again.
+The first run opens a visible Chrome window at chatgpt.com. Log in there —
+the script polls for you, no need to switch back to the terminal — and the
+session is cached in `.chatgpt_profile/` (gitignored) so you won't need to
+log in again.
 
 **If Google shows "Niet inloggen" / "This browser or app may not be
 secure"**: that's Google's account security flagging the automated browser,
@@ -40,6 +41,12 @@ fix if it still does.
 Already-imported conversations are tracked in `imported.json` (gitignored)
 and skipped on re-runs, so it's safe to stop and resume.
 
+Images in a conversation are downloaded (via the same authenticated browser
+session, so signed/cookie-gated ChatGPT CDN URLs work) and re-uploaded to
+Chronicle's local attachment store, then linked to the imported object —
+they show up in Chronicle's UI alongside the note, not just as a dead link
+in the text.
+
 ## Flags
 
 - `--limit N` — only import the N most recent conversations.
@@ -53,9 +60,8 @@ and skipped on re-runs, so it's safe to stop and resume.
 ## Known limitations
 
 Selectors (`[data-message-author-role]` for messages, `a[href^="/c/"]` for
-the sidebar list, `[role="tooltip"]` for the timestamp) are best-effort
-against ChatGPT's current DOM — they weren't verified against a live,
-logged-in session while writing this, since that requires your own account.
-If a run finds 0 conversations or 0 turns, ChatGPT's markup has likely
-changed; open devtools on chatgpt.com and check whether those selectors
-still match, and report back what changed.
+the sidebar list, `[role="separator"][aria-label]` for the date grouping)
+are confirmed against a real logged-in session's devtools, but ChatGPT's
+markup can still change over time. If a run finds 0 conversations or 0
+turns, open devtools on chatgpt.com and check whether those selectors still
+match, and report back what changed.

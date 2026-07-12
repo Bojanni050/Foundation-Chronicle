@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare, Lock, Unlock, Eye, Pencil } from "lucide-react";
+import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare, Lock, Unlock, Eye, Pencil, Paperclip } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { objectRepository } from "@/repositories";
@@ -7,6 +7,7 @@ import { AIService, keywordTags } from "@/services/AIService";
 import { typeMeta } from "@/lib/objectTypes";
 import { useTypes } from "@/hooks/useTypes";
 import { fmtDate, SOURCE_OPTIONS, sourceValue } from "@/lib/format";
+import { getSettings } from "@/lib/settings";
 import { TagEditor } from "@/components/TagEditor";
 import {
   Select,
@@ -212,6 +213,8 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
   };
 
   const meta = typeMeta(type);
+  const { apiUrl } = getSettings();
+  const attachments = object.attachments || [];
 
   return (
     <div className="mx-auto flex h-full w-full max-w-2xl flex-col px-10 pt-10 pb-6 rise-in" data-testid="object-detail">
@@ -273,6 +276,41 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
           />
         )}
       </div>
+
+      {attachments.length > 0 && (
+        <div className="mt-3 shrink-0 flex flex-wrap gap-2" data-testid="object-attachments">
+          {attachments.map((att) => {
+            const href = `${apiUrl}${att.url}`;
+            const isImage = (att.mimeType || "").startsWith("image/");
+            return isImage ? (
+              <a
+                key={att.id}
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                title={att.filename}
+                data-testid="attachment-image"
+                className="block h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-accent/20 hover:opacity-80 transition-opacity"
+              >
+                <img src={href} alt={att.filename} className="h-full w-full object-cover" />
+              </a>
+            ) : (
+              <a
+                key={att.id}
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                title={att.filename}
+                data-testid="attachment-file"
+                className="flex items-center gap-1.5 rounded-full border border-border bg-accent/20 px-2.5 py-1 text-xs text-muted-foreground hover:text-ink hover:bg-accent/40 transition-colors"
+              >
+                <Paperclip className="w-3 h-3" />
+                <span className="max-w-[140px] truncate">{att.filename}</span>
+              </a>
+            );
+          })}
+        </div>
+      )}
 
       {/* subtle metadata bar — everything about classifying comes AFTER writing */}
       <div className="mt-4 shrink-0 border-t border-border pt-3">

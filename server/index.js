@@ -26,6 +26,7 @@ const embeddingRouter = require("./routes/embedding");
 const specialistRouter = require("./routes/specialist");
 const gaiaHermesProxyRouter = require("./routes/gaiaHermesProxy");
 const chatgptImportRouter = require("./routes/chatgptImport");
+const attachmentsRouter = require("./routes/attachments");
 
 const HOST = "127.0.0.1"; // localhost-only — never 0.0.0.0
 const PORT = process.env.CHRONICLE_PORT || 4577;
@@ -74,10 +75,11 @@ app.use("/api/specialist", specialistRouter);
 app.use("/api/objects", embeddingRouter); // POST /api/objects/:objectId/embed
 app.use("/api/settings/gaia-hermes", gaiaHermesProxyRouter);
 app.use("/api/settings/chatgpt-import", chatgptImportRouter);
+app.use("/api/attachments", attachmentsRouter);
 
 // Extension → queue a chat object
 app.post("/api/objects/import", requireAuth, (req, res) => {
-  const { title, content, sourceProvider, url, tags, turns, occurredAt } = req.body || {};
+  const { title, content, sourceProvider, url, tags, turns, occurredAt, attachments } = req.body || {};
   if (!content) return res.status(400).json({ error: "content required" });
   const objectId = "inbox_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   pushToInbox({
@@ -95,6 +97,11 @@ app.post("/api/objects/import", requireAuth, (req, res) => {
     turns: Array.isArray(turns) ? turns : [],
     queuedAt: new Date().toISOString(),
     occurredAt: occurredAt || null,
+    // Metadata only ({id, filename, mimeType, size, url} per item) — the
+    // actual bytes were already POSTed to /api/attachments beforehand and
+    // live on disk under server/data/attachments/. Optional, so older
+    // callers (extension, manual imports) that never send this still work.
+    attachments: Array.isArray(attachments) ? attachments : [],
   });
   res.status(201).json({ success: true, objectId });
 });

@@ -64,6 +64,10 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       content: data.content || "",
       contentHash: data.contentHash || (data.content ? contentHash(data.content) : ""),
       tags: Array.isArray(data.tags) ? data.tags : [],
+      // Metadata only ({id, filename, mimeType, size, url} per item) — the
+      // actual bytes live on the local server (server/data/attachments/),
+      // never in IndexedDB, to keep large binaries out of browser storage.
+      attachments: Array.isArray(data.attachments) ? data.attachments : [],
       source: data.source || "manual",
       sourceProvider: data.sourceProvider || null,
       sourceUrl: data.sourceUrl || null,

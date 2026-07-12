@@ -24,16 +24,19 @@ imported.json (also not committed) and skipped on subsequent runs.
 
 import argparse
 import json
+import mimetypes
 import re
 import sys
 import time
-import urllib.request
 import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from markdownify import markdownify as md
+from bs4 import BeautifulSoup
 
 ROOT = Path(__file__).resolve().parents[2]  # repo root
 PROFILE_DIR = Path(__file__).resolve().parent / ".chatgpt_profile"
@@ -105,41 +108,202 @@ def save_state(state):
     STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def post_import(api_url, token, payload):
+def post_import(api_url, token, payload, retries=2):
     req = urllib.request.Request(
         f"{api_url}/api/objects/import",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        return e.code, {"error": e.read().decode("utf-8", "ignore")}
-    except urllib.error.URLError as e:
-        return 0, {"error": str(e)}
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            return e.code, {"error": e.read().decode("utf-8", "ignore")}
+        except (urllib.error.URLError, OSError) as e:
+            # A raw socket timeout (a plain TimeoutError, which is an
+            # OSError subclass) during response reading is NOT wrapped in
+            # URLError by urllib — it used to crash the whole run instead of
+            # just failing this one conversation. Transient over a
+            # multi-hour scrape, so worth a couple of retries before giving up.
+            if attempt < retries:
+                print(f"    ! import request failed ({e}), retrying...")
+                time.sleep(2)
+                continue
+            return 0, {"error": str(e)}
+
+
+def post_attachment(api_url, token, data, filename, mime_type, retries=1):
+    """Uploads raw bytes to Chronicle's attachment store, returning the
+    {id, filename, mimeType, size, url} metadata to embed in the object's
+    `attachments` array, or None on failure (never fatal to the import)."""
+    req = urllib.request.Request(
+        f"{api_url}/api/attachments",
+        data=data,
+        headers={
+            "Content-Type": mime_type or "application/octet-stream",
+            "Authorization": f"Bearer {token}",
+            "X-Attachment-Filename": urllib.parse.quote(filename),
+        },
+        method="POST",
+    )
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
+            if attempt < retries:
+                time.sleep(2)
+                continue
+            print(f"    ! attachment upload failed for {filename!r}: {e}")
+            return None
+
+
+def download_and_upload_images(page, img_urls, api_url, token):
+    """Downloads each image via the page's own authenticated request context
+    (so signed/cookie-gated ChatGPT CDN URLs work the same as they do in the
+    browser) and re-uploads it to Chronicle's local attachment store. Returns
+    a list of attachment metadata dicts; failures are skipped, not fatal."""
+    attachments = []
+    for i, src in enumerate(img_urls):
+        try:
+            resp = page.request.get(src, timeout=30000)
+            if not resp.ok:
+                print(f"    ! image download failed ({resp.status}): {src[:100]}")
+                continue
+            data = resp.body()
+            mime_type = resp.headers.get("content-type", "image/png").split(";")[0].strip()
+            ext = mimetypes.guess_extension(mime_type) or ".png"
+            filename = f"image-{i + 1}{ext}"
+            meta = post_attachment(api_url, token, data, filename, mime_type)
+            if meta:
+                attachments.append(meta)
+        except Exception as e:
+            print(f"    ! image download error: {e}")
+    return attachments
+
+
+def extract_and_strip_images(html):
+    """Pulls http(s) <img> src URLs out of a message's HTML and returns
+    (cleaned_html, [urls]). Images are represented as separate `attachments`
+    on the object (see ObjectDetail.jsx's attachment strip), not inlined
+    into the markdown text, so they're removed here rather than left for
+    markdownify to turn into a ![](...) pointing at a URL that will expire
+    once the browser session that has access to it is gone. data: URIs are
+    left alone (skipped, not stripped) — those are almost always small
+    decorative/icon images, not worth downloading."""
+    if "<img" not in html:
+        return html, []
+    soup = BeautifulSoup(html, "html.parser")
+    urls = []
+    for img in soup.find_all("img"):
+        src = img.get("src", "")
+        if src.startswith("http://") or src.startswith("https://"):
+            urls.append(src)
+            img.decompose()
+    return str(soup), urls
 
 
 def collect_conversation_links(page, limit=None):
     """Scrolls the sidebar history list to load every conversation link.
     Selector is anchored on ChatGPT's URL pattern (/c/<uuid>) rather than a
     classname, since that's the part of the DOM least likely to change."""
-    page.wait_for_selector('a[href^="/c/"]', timeout=20000)
+    # is_logged_in() (in main()) just confirmed this selector existed, but
+    # ChatGPT can still reload/redirect right after auth completes (final
+    # SSO bounce, a client-side route change, etc.), briefly wiping the DOM
+    # before the sidebar re-renders. Retry with a reload instead of a single
+    # 20s wait+crash, and if it's still not there, print enough about the
+    # actual page state to diagnose rather than an opaque timeout traceback.
+    found = False
+    for attempt in range(3):
+        try:
+            page.wait_for_selector('a[href^="/c/"]', timeout=15000)
+            found = True
+            break
+        except PWTimeout:
+            print(f"  [diag] attempt {attempt + 1}/3: sidebar links not found after 15s, "
+                  f"url={page.url!r} title={page.title()!r}")
+            if attempt < 2:
+                page.reload(wait_until="domcontentloaded")
+                page.wait_for_timeout(1500)
+    if not found:
+        snippet = ""
+        try:
+            snippet = page.evaluate("() => document.body.innerText.slice(0, 500)")
+        except Exception:
+            pass
+        print(f"  ! Could not find any conversations in the sidebar after 3 attempts. "
+              f"Current page: url={page.url!r} title={page.title()!r}")
+        print(f"  ! Page text snippet: {snippet!r}")
+        print("  ! This may mean ChatGPT showed a rate-limit/verification page after repeated "
+              "automated logins, or the account genuinely has no chat history in this profile.")
+        return []
+
+    # page.mouse.wheel() scrolls whatever happens to be under the cursor,
+    # not necessarily the sidebar list — target its actual scrollable
+    # ancestor directly instead, same approach as collect_turns.
+    handle = page.evaluate_handle(
+        """() => {
+            const anyLink = document.querySelector('a[href^="/c/"]');
+            let el = anyLink && anyLink.parentElement;
+            while (el) {
+                const style = getComputedStyle(el);
+                if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4) {
+                    return el;
+                }
+                el = el.parentElement;
+            }
+            return document.scrollingElement;
+        }"""
+    )
+    diag = page.evaluate(
+        "(el) => ({ tag: el.tagName, cls: (el.className||'').toString().slice(0,80), scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, isScrollingElement: el === document.scrollingElement })",
+        handle,
+    )
+    print(f"  [diag] sidebar scroll target: {diag}")
+
     seen = {}
-    stable_rounds = 0
-    for _ in range(300):
+
+    def collect_current():
         for a in page.query_selector_all('a[href^="/c/"]'):
             href = a.get_attribute("href")
             if href and href not in seen:
                 seen[href] = (a.inner_text() or "").strip()
-        before = len(seen)
+
+    collect_current()
+    print(f"  [diag] links before any scrolling: {len(seen)}")
+
+    # ChatGPT fetches older history over the network once you approach the
+    # bottom of the sidebar — that round-trip takes noticeably longer than a
+    # render tick. The previous version waited only 400ms per step and
+    # concluded "nothing more to load" the moment scrollHeight looked stable
+    # for two rounds (~800ms total) - nowhere near enough time for that
+    # fetch to land, so it always stopped at whatever was already rendered.
+    # Scroll straight to the current bottom each round, then give it a much
+    # longer settle wait and require several consecutive quiet rounds
+    # (checking both link count AND scrollHeight, since a fetch can add
+    # DOM — a new date-group header, say — before new links appear) before
+    # concluding history is actually exhausted.
+    SETTLE_WAIT_MS = 1500
+    REQUIRED_STABLE_SETTLES = 4
+    stable_settles = 0
+    for i in range(200):
         if limit and len(seen) >= limit:
             break
-        page.mouse.wheel(0, 2000)
-        page.wait_for_timeout(400)
-        stable_rounds = stable_rounds + 1 if len(seen) == before else 0
-        if stable_rounds >= 4:
+        before_links = len(seen)
+        before_height = page.evaluate("(el) => el.scrollHeight", handle)
+
+        page.evaluate("(el) => { el.scrollTop = el.scrollHeight; }", handle)
+        page.wait_for_timeout(SETTLE_WAIT_MS)
+
+        collect_current()
+        after_height = page.evaluate("(el) => el.scrollHeight", handle)
+        grew = len(seen) > before_links or after_height > before_height + 4
+        stable_settles = 0 if grew else stable_settles + 1
+
+        print(f"  [diag] round {i}: links={len(seen)} height={before_height}->{after_height} grew={grew} stableSettles={stable_settles}")
+        if stable_settles >= REQUIRED_STABLE_SETTLES:
             break
     items = list(seen.items())
     return items[:limit] if limit else items
@@ -245,11 +409,14 @@ def collect_turns(page):
         merge_in(snapshot())
 
     turns = []
+    image_urls = []
     for item in merged:
-        text = md(item["html"], heading_style="ATX", bullets="-").strip()
+        cleaned_html, urls = extract_and_strip_images(item["html"])
+        image_urls.extend(urls)
+        text = md(cleaned_html, heading_style="ATX", bullets="-").strip()
         if text:
             turns.append({"role": item["role"], "text": text})
-    return turns, last_date_label
+    return turns, last_date_label, image_urls
 
 
 def format_turns(turns):
@@ -264,7 +431,7 @@ def import_conversation(page, url, title_hint, api_url, token):
         print(f"  ! no messages found, skipping: {url}")
         return False
 
-    turns, last_date_label = collect_turns(page)
+    turns, last_date_label, image_urls = collect_turns(page)
     if not turns:
         print(f"  ! no turns extracted, skipping: {url}")
         return False
@@ -274,8 +441,17 @@ def import_conversation(page, url, title_hint, api_url, token):
         dt = parse_relative_date_label(last_date_label)
         occurred_at = dt.isoformat() if dt else None
 
+    attachments = []
+    if image_urls:
+        print(f"  downloading {len(image_urls)} image(s)...")
+        attachments = download_and_upload_images(page, image_urls, api_url, token)
+
     content = format_turns(turns)
-    title = next((t["text"][:80] for t in turns if t["role"] == "user"), title_hint or page.title())
+    # title_hint is ChatGPT's own conversation title, read from the sidebar
+    # link's text in collect_conversation_links — prefer that over deriving
+    # one from the first message, since it's the title the user actually
+    # sees (and often edits) in ChatGPT itself.
+    title = title_hint or next((t["text"][:80] for t in turns if t["role"] == "user"), page.title())
 
     payload = {
         "title": title,
@@ -284,10 +460,11 @@ def import_conversation(page, url, title_hint, api_url, token):
         "sourceProvider": "chatgpt",
         "url": url,
         "occurredAt": occurred_at,
+        "attachments": attachments,
     }
     status, body = post_import(api_url, token, payload)
     if status == 201:
-        print(f"  -> imported {len(turns)} turns (occurredAt={occurred_at})")
+        print(f"  -> imported {len(turns)} turns, {len(attachments)} attachment(s) (occurredAt={occurred_at})")
         return True
     print(f"  ! import failed ({status}): {body}")
     return False
@@ -388,7 +565,17 @@ def main():
             if url in imported:
                 continue
             print(f"[{i}/{len(links)}] {title_hint or url}")
-            if import_conversation(page, url, title_hint, args.api_url, token):
+            try:
+                ok = import_conversation(page, url, title_hint, args.api_url, token)
+            except Exception as e:
+                # One bad conversation (a stray Playwright error, an
+                # unhandled network hiccup, ...) must not take down a
+                # multi-hour, 70+-conversation run — already-imported ones
+                # stay saved in imported.json either way, so this is just
+                # "skip and keep going", not data loss.
+                print(f"  ! unexpected error, skipping this conversation: {e}")
+                ok = False
+            if ok:
                 imported.add(url)
                 state["imported_urls"] = sorted(imported)
                 save_state(state)

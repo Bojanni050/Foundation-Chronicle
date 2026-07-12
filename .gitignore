@@ -90,6 +90,10 @@ credentials.json
 # Gaia's self-contained Hermes backend — runtime state, .env, sessions, skills
 server/gaia-backend/.hermes-home/
 
+# Downloaded attachment files (images etc. linked to objects) — runtime
+# binary data written by server/attachmentsStore.js, not source.
+server/data/attachments/
+
 # Vendored native binaries (llama.cpp/ggml) for the local model sidecar —
 # large, platform-specific, not source — fetched/built separately, not committed.
 src-tauri/binaries/

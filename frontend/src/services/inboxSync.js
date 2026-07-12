@@ -62,6 +62,7 @@ export async function pollInbox() {
         sourceProvider: it.sourceProvider || null,
         sourceUrl: it.url || null,
         occurredAt: it.occurredAt || null,
+        attachments: Array.isArray(it.attachments) ? it.attachments : [],
       });
       created++;
       // Best-effort — doesn't block the import if the local server or the
