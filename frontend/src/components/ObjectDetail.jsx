@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare, Lock, Unlock, Eye, Pencil, Paperclip } from "lucide-react";
+import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare, Lock, Unlock, Eye, Pencil, Paperclip, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { objectRepository } from "@/repositories";
@@ -116,6 +116,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
   const [locked, setLocked] = useState(!!object.locked);
   const [lockBusy, setLockBusy] = useState(false);
   const [preview, setPreview] = useState(!!(object.title || object.content));
+  const [lightboxImage, setLightboxImage] = useState(null);
   const timer = useRef(null);
   const idRef = useRef(object.id);
   const pending = useRef({});
@@ -142,6 +143,7 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
     setLocked(!!object.locked);
     const isNew = !object.title && !object.content;
     setPreview(!isNew);
+    setLightboxImage(null);
     // content-first capture: a fresh, empty entry drops the cursor straight
     // into the writing surface — no type to pick first.
     if (isNew) {
@@ -286,11 +288,15 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
               <a
                 key={att.id}
                 href={href}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setLightboxImage(href);
+                }}
                 target="_blank"
                 rel="noreferrer"
                 title={att.filename}
                 data-testid="attachment-image"
-                className="block h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-accent/20 hover:opacity-80 transition-opacity"
+                className="block h-20 w-20 shrink-0 cursor-pointer overflow-hidden rounded-lg border border-border bg-accent/20 hover:opacity-80 transition-opacity"
               >
                 <img src={href} alt={att.filename} className="h-full w-full object-cover" />
               </a>
@@ -482,6 +488,26 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
           </span>
         </div>
       </div>
+
+      {lightboxImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 fade-in"
+          onClick={() => setLightboxImage(null)}
+        >
+          <button
+            className="absolute top-4 right-4 rounded-full bg-black/50 p-2 text-white hover:bg-black/70 transition-colors"
+            onClick={() => setLightboxImage(null)}
+          >
+            <X className="w-6 h-6" />
+          </button>
+          <img
+            src={lightboxImage}
+            alt="Enlarged attachment"
+            className="max-h-full max-w-full rounded-md object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
