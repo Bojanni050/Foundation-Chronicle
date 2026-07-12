@@ -55,7 +55,10 @@ export async function suggestPersonaKenmerken(rejectedKenmerken, objects) {
     "persona"
   );
   const arr = firstJsonArray(out);
-  if (!arr) throw new Error("BAD_RESPONSE");
+  if (!arr) {
+    console.error("BAD_RESPONSE in suggestPersonaKenmerken. Model output:", out);
+    throw new Error("BAD_RESPONSE");
+  }
   // Default missing categorie to "persona" — keeps older/looser model
   // output backward-compatible instead of silently dropping candidates.
   return arr.map((c) => ({ ...c, categorie: c.categorie === "algemeen" ? "algemeen" : "persona" }));

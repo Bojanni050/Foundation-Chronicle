@@ -112,10 +112,25 @@ export async function chat(messages, extra = {}, model, context = "unknown", cus
 }
 
 export function firstJsonArray(text) {
-  const m = text.match(/\[[\s\S]*\]/);
-  if (!m) return null;
+  // Strip <think>...</think> blocks from reasoning models
+  const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+  
+  // Try to find a markdown json block first
+  const blockMatch = cleaned.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+  if (blockMatch) {
+    try { return JSON.parse(blockMatch[1]); } catch {}
+  }
+  
+  // Fallback to finding the first array-like structure
+  // Using a non-greedy match that stops at the last closing bracket of the structure
+  let start = cleaned.indexOf('[');
+  if (start === -1) return null;
+  
+  let end = cleaned.lastIndexOf(']');
+  if (end === -1 || end < start) return null;
+  
   try {
-    return JSON.parse(m[0]);
+    return JSON.parse(cleaned.slice(start, end + 1));
   } catch {
     return null;
   }
