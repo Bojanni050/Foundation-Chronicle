@@ -10,6 +10,7 @@ import { useTypes } from "@/hooks/useTypes";
 import { fmtDate, SOURCE_OPTIONS, sourceValue } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { TagEditor } from "@/components/TagEditor";
+import { ObjectLinks } from "@/components/ObjectLinks";
 import {
   Select,
   SelectContent,
@@ -139,7 +140,7 @@ function formatForInput(iso) {
   }
 }
 
-export function ObjectDetail({ object, onSaved, onDelete }) {
+export function ObjectDetail({ object, allObjects, onSaved, onDelete, onOpen }) {
   const allTypes = useTypes();
   const [title, setTitle] = useState(object.title);
   const [content, setContent] = useState(object.content);
@@ -151,6 +152,7 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
   const [validFrom, setValidFrom] = useState(formatForInput(object.validFrom));
   const [validTo, setValidTo] = useState(formatForInput(object.validTo));
   const [temporalText, setTemporalText] = useState(object.temporalText || "");
+  const [links, setLinks] = useState(object.links || []);
   const [showTemporal, setShowTemporal] = useState(false);
   const [saveState, setSaveState] = useState("saved"); // saved | saving
   const [aiNote, setAiNote] = useState("");
@@ -182,6 +184,7 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
     setValidFrom(formatForInput(object.validFrom));
     setValidTo(formatForInput(object.validTo));
     setTemporalText(object.temporalText || "");
+    setLinks(object.links || []);
     setShowTemporal(!!(object.occurredAt || object.validFrom || object.validTo || object.temporalText));
     setSaveState("saved");
     setAiNote("");
@@ -376,6 +379,15 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
         </div>
       )}
 
+      <ObjectLinks
+        object={object}
+        allObjects={allObjects}
+        links={links}
+        locked={locked}
+        onLinksChange={(nextLinks) => change("links", nextLinks, setLinks)}
+        onOpen={onOpen}
+      />
+
       {/* subtle metadata bar — everything about classifying comes AFTER writing */}
       <div className="mt-4 shrink-0 border-t border-border pt-3">
         <div className="mb-2.5">
@@ -500,8 +512,8 @@ export function ObjectDetail({ object, onSaved, onDelete }) {
               </span>
             </>
           )}
-          {(object.links || []).length > 0 && (
-            <span className="flex items-center gap-1"><Link2 className="w-3.5 h-3.5" />{object.links.length}</span>
+          {links.length > 0 && (
+            <span className="flex items-center gap-1"><Link2 className="w-3.5 h-3.5" />{links.length}</span>
           )}
 
           <span className="ml-auto flex items-center gap-3">

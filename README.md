@@ -121,6 +121,15 @@ explicit confirmation Chronicle creates a locked IndexedDB object under the
 original ID, clearly labelled as recovered rather than pretending it is the
 original source.
 
+### Object connections and backlinks
+
+Every object can link directly to other archived objects. The object detail
+view searches link candidates locally, shows outgoing links and backlinks, and
+opens either side without leaving the archive. Links to a deleted or unavailable
+object remain visible as missing provenance and can be removed explicitly.
+Linked object titles also participate in global search, while the existing
+`links[]` field remains portable through archive backup and restore.
+
 ### 🔐 Local Username & PIN Lock Screen
 * Secure your local workspace. On first launch, set up a username and choose a 4-to-6 digit security PIN code.
 * Interactive numpad with tactile hover effects, keyboard bind entries (`0-9` and `Backspace`), shake animation error handlers, and a "Lock Workspace" action in the sidebar.

@@ -271,8 +271,10 @@ export default function App() {
           <ObjectDetail
             key={selectedObject.id}
             object={selectedObject}
+            allObjects={allObjects}
             onSaved={onSaved}
             onDelete={onDelete}
+            onOpen={openObject}
           />
         ) : (
           <WelcomeEmpty />

@@ -215,16 +215,22 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       );
     }
     const q = query.toLowerCase().trim();
+    const byId = new Map(all.map((object) => [object.id, object]));
     const scored = all
       .map((o) => {
         const title = (o.title || "").toLowerCase();
         const tags = (o.tags || []).join(" ").toLowerCase();
         const temporal = (o.temporalText || "").toLowerCase();
-        const hay = [title, (o.content || "").toLowerCase(), tags, (o.sourceProvider || "").toLowerCase(), temporal].join(" ");
+        const linkedTitles = (o.links || [])
+          .map((id) => byId.get(id)?.title || "")
+          .join(" ")
+          .toLowerCase();
+        const hay = [title, (o.content || "").toLowerCase(), tags, (o.sourceProvider || "").toLowerCase(), temporal, linkedTitles].join(" ");
         let score = 0;
         if (title.includes(q)) score += 5;
         if (tags.includes(q)) score += 3;
         if (temporal.includes(q)) score += 2;
+        if (linkedTitles.includes(q)) score += 2;
         if (hay.includes(q)) score += 1;
         if (score === 0 && fuzzyMatch(q, hay)) score += 0.5;
         return { o, score };
