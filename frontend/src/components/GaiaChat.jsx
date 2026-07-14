@@ -78,6 +78,9 @@ export function GaiaChat({ open, onClose }) {
     setMessages(prev => [...prev, { role: 'user', text: userText }]);
     setIsLoading(true);
 
+    const assistantMessageIndex = messages.length + 1;
+    setMessages(prev => [...prev, { role: 'assistant', text: '' }]);
+
     try {
       const response = await fetch('http://localhost:4577/api/agent/chat', {
         method: 'POST',
@@ -92,15 +95,73 @@ export function GaiaChat({ open, onClose }) {
         throw new Error(`Server error: ${response.status}`);
       }
 
-      const data = await response.json();
-      if (data.error) {
-        throw new Error(data.error);
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body available');
       }
 
-      setMessages(prev => [...prev, { role: 'assistant', text: data.response || "Geen tekstueel antwoord ontvangen." }]);
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line) continue;
+          if (!line.startsWith('{')) continue;
+
+          try {
+            const payload = JSON.parse(line);
+            if (typeof payload?.delta === 'string') {
+              finalText += payload.delta;
+              setMessages(prev => {
+                const next = [...prev];
+                next[assistantMessageIndex] = { ...next[assistantMessageIndex], text: finalText };
+                return next;
+              });
+            } else if (typeof payload?.response === 'string') {
+              finalText = payload.response;
+              setMessages(prev => {
+                const next = [...prev];
+                next[assistantMessageIndex] = { ...next[assistantMessageIndex], text: finalText };
+                return next;
+              });
+            }
+          } catch (_err) {
+            // Ignore non-JSON chunks and keep streaming.
+          }
+        }
+      }
+
+      if (buffer.trim()) {
+        try {
+          const payload = JSON.parse(buffer.trim());
+          if (typeof payload?.response === 'string') {
+            finalText = payload.response;
+            setMessages(prev => {
+              const next = [...prev];
+              next[assistantMessageIndex] = { ...next[assistantMessageIndex], text: finalText };
+              return next;
+            });
+          }
+        } catch (_err) {
+          // Ignore trailing non-JSON content.
+        }
+      }
     } catch (err) {
-      console.error("Gaia Chat Error:", err);
-      setMessages(prev => [...prev, { role: 'assistant', text: `Oeps, er ging iets mis: ${err.message}` }]);
+      console.error('Gaia Chat Error:', err);
+      setMessages(prev => {
+        const next = [...prev];
+        next[assistantMessageIndex] = { ...next[assistantMessageIndex], text: `Oeps, er ging iets mis: ${err.message}` };
+        return next;
+      });
     } finally {
       setIsLoading(false);
     }

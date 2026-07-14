@@ -1,9 +1,13 @@
 import sys
 import os
 import logging
+import json
+import queue
+import threading
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -81,30 +85,60 @@ def normalize_conversation_history(history: Optional[List[Dict[str, Any]]]) -> O
     return normalized or None
 
 
-@app.post("/chat")
-def chat_endpoint(request: ChatRequest):
-    """
-    Synchrone endpoint (draait in FastAPI threadpool) om Hermes een bericht te sturen.
-    """
-    logger.info(f"Received message for Gaia: {request.message}")
+def _iter_agent_stream(request: ChatRequest):
+    """Yield NDJSON chunks as the Hermes agent emits deltas and then a final response."""
     if not agent:
-        raise HTTPException(status_code=500, detail="Agent is not initialized")
+        raise RuntimeError("Agent is not initialized")
 
     history = normalize_conversation_history(request.history)
     if history is not None:
         logger.info("Passing %s historical message(s) to Hermes agent", len(history))
 
+    event_queue: "queue.Queue[Optional[Dict[str, Any]] ]" = queue.Queue()
+    finished = object()
+
+    def _run_agent() -> None:
+        try:
+            result = agent.run_conversation(
+                user_message=request.message,
+                task_id=request.task_id,
+                conversation_history=history,
+                stream_callback=lambda delta: event_queue.put({"delta": delta}) if isinstance(delta, str) and delta else None,
+            )
+            final_response = result.get("final_response") if isinstance(result, dict) else None
+            if final_response is None and isinstance(result, dict):
+                final_response = result.get("response")
+            if isinstance(final_response, str) and final_response:
+                event_queue.put({"response": final_response})
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            logger.error(f"Error during agent execution: {exc}", exc_info=True)
+            event_queue.put({"error": str(exc)})
+        finally:
+            event_queue.put(finished)
+
+    worker = threading.Thread(target=_run_agent, daemon=True)
+    worker.start()
+
+    while True:
+        item = event_queue.get()
+        if item is finished:
+            break
+        if isinstance(item, dict):
+            yield json.dumps(item) + "\n"
+
+
+@app.post("/chat")
+def chat_endpoint(request: ChatRequest):
+    """
+    Stream NDJSON chunks to the frontend so the chat UI can render incrementally.
+    """
+    logger.info(f"Received message for Gaia: {request.message}")
     try:
-        result = agent.run_conversation(
-            user_message=request.message,
-            task_id=request.task_id,
-            conversation_history=history,
+        return StreamingResponse(
+            _iter_agent_stream(request),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache"},
         )
-        return {
-            "success": True,
-            "response": result.get("final_response"),
-            "messages_count": len(result.get("messages", []))
-        }
     except Exception as e:
         logger.error(f"Error during agent execution: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
