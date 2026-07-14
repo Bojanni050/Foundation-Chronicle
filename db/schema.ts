@@ -307,6 +307,27 @@ export const evidence = pgTable(
   ],
 );
 
+// A confirmed hypothesis's output — a distinct, structurally separate record
+// from the hypothesis that produced it, not just a status flag. A hypothesis
+// can be confirmed at most once (epistemicPolicy.confirmHypothesis only ever
+// runs from "open"), so one hypothesis produces at most one fact — enforced
+// here too via the unique index, not just by application logic. Append-only
+// like episode, for the same reason: a fact is a historical record of "this
+// was confirmed, on this date" — a later doubt about it is new evidence
+// against a NEW hypothesis, never a silent edit of this record.
+export const fact = pgTable(
+  "fact",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    inhoud: text("inhoud").notNull(),
+    hypothesisId: uuid("hypothesis_id")
+      .notNull()
+      .references(() => hypothesis.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("fact_hypothesis_id_unique").on(table.hypothesisId)],
+);
+
 export const knowledgeGap = pgTable("knowledge_gap", {
   id: uuid("id").primaryKey().defaultRandom(),
   onderwerp: text("onderwerp").notNull(),

@@ -210,7 +210,8 @@ router.post("/hypotheses", async (req, res) => {
 });
 
 // GET /api/memory/hypotheses/:id — detail + evidence + the current
-// (read-only, never-stored) verification verdict.
+// (read-only, never-stored) verification verdict, plus the resulting fact
+// if this hypothesis has been confirmed.
 router.get("/hypotheses/:id", async (req, res) => {
   const { rows } = await pool.query("SELECT * FROM hypothesis WHERE id = $1", [req.params.id]);
   const hyp = rows[0];
@@ -224,8 +225,15 @@ router.get("/hypotheses/:id", async (req, res) => {
      ORDER BY e.created_at ASC`,
     [req.params.id]
   );
+  const { rows: factRows } = await pool.query("SELECT * FROM fact WHERE hypothesis_id = $1", [req.params.id]);
   const verdict = isVerified(evidenceRows);
-  res.json({ ...hyp, evidence: evidenceRows, verdict });
+  res.json({ ...hyp, evidence: evidenceRows, verdict, fact: factRows[0] || null });
+});
+
+// GET /api/memory/facts — every confirmed hypothesis's resulting fact.
+router.get("/facts", async (_req, res) => {
+  const { rows } = await pool.query("SELECT * FROM fact ORDER BY created_at DESC");
+  res.json(rows);
 });
 
 // POST /api/memory/hypotheses/:id/evidence — interpret one frozen episode
@@ -264,21 +272,46 @@ router.post("/hypotheses/:id/evidence", async (req, res, next) => {
 // can confirm a not-yet-"verified" hypothesis (their call, their evidence
 // standard) or decline to confirm a "verified" one — the computed verdict
 // is advisory, never load-bearing on its own.
-router.patch("/hypotheses/:id/confirm", async (req, res) => {
-  const { rows } = await pool.query("SELECT * FROM hypothesis WHERE id = $1", [req.params.id]);
-  const hyp = rows[0];
-  if (!hyp) return res.status(404).json({ error: "not found" });
-  let patch;
+//
+// Confirmation produces a fact — a distinct, append-only record, not just a
+// status flag on the hypothesis — so both writes happen in one transaction:
+// a hypothesis can never end up "confirmed" without the fact that makes that
+// confirmation legible as a first-class object, or vice versa.
+router.patch("/hypotheses/:id/confirm", async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    patch = confirmHypothesis(hyp);
+    await client.query("BEGIN");
+    // FOR UPDATE: two concurrent confirms on the same hypothesis must not
+    // both pass the "status is open" check before either writes.
+    const { rows } = await client.query("SELECT * FROM hypothesis WHERE id = $1 FOR UPDATE", [req.params.id]);
+    const hyp = rows[0];
+    if (!hyp) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "not found" });
+    }
+    let patch;
+    try {
+      patch = confirmHypothesis(hyp);
+    } catch (err) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: err.message });
+    }
+    const { rows: updated } = await client.query(
+      "UPDATE hypothesis SET status = $1, confirmed_at = $2 WHERE id = $3 RETURNING *",
+      [patch.status, patch.confirmedAt, req.params.id]
+    );
+    const { rows: factRows } = await client.query(
+      "INSERT INTO fact (inhoud, hypothesis_id) VALUES ($1, $2) RETURNING *",
+      [hyp.hypothese, req.params.id]
+    );
+    await client.query("COMMIT");
+    res.json({ ...updated[0], fact: factRows[0] });
   } catch (err) {
-    return res.status(409).json({ error: err.message });
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
   }
-  const { rows: updated } = await pool.query(
-    "UPDATE hypothesis SET status = $1, confirmed_at = $2 WHERE id = $3 RETURNING *",
-    [patch.status, patch.confirmedAt, req.params.id]
-  );
-  res.json(updated[0]);
 });
 
 // PATCH /api/memory/hypotheses/:id/reject  { reden: string }

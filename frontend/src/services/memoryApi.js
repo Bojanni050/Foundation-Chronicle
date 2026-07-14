@@ -40,6 +40,13 @@ export function listHypotheses(status) {
   return memoryRequest(`/hypotheses${query}`);
 }
 
+// Every confirmed hypothesis's resulting fact — a distinct, append-only
+// record, not just a status flag on the hypothesis (see server/routes/
+// memory.js's /hypotheses/:id/confirm for how a fact comes to exist).
+export function listFacts() {
+  return memoryRequest("/facts");
+}
+
 export function exportMemory() {
   return memoryRequest("/export");
 }
