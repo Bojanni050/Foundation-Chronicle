@@ -43,8 +43,19 @@ export function listHypotheses(status) {
 // Every confirmed hypothesis's resulting fact — a distinct, append-only
 // record, not just a status flag on the hypothesis (see server/routes/
 // memory.js's /hypotheses/:id/confirm for how a fact comes to exist).
-export function listFacts() {
-  return memoryRequest("/facts");
+// { active: true } restricts to facts nothing has superseded yet — the set
+// hypothesisReflectionSync.js scans so it never proposes replacing an
+// already-replaced fact.
+export function listFacts({ active } = {}) {
+  const query = active ? "?active=true" : "";
+  return memoryRequest(`/facts${query}`);
+}
+
+// Episodes captured since `sinceIso` (all of them if omitted) — recent raw
+// observations for the reflection pipeline to weigh against active facts.
+export function listEpisodesSince(sinceIso) {
+  const query = sinceIso ? `?since=${encodeURIComponent(sinceIso)}` : "";
+  return memoryRequest(`/episodes${query}`);
 }
 
 export function exportMemory() {
@@ -101,7 +112,10 @@ export function getHypothesis(id) {
 // Accepts either a plain string (MemoryDialog's manual "New hypothesis"
 // input — text only, no criteria) or a full candidate object with
 // verification/confirmation/rejection criteria (hypothesisSync.js's
-// automatic extraction, which can state them concretely from the source).
+// automatic extraction, which can state them concretely from the source) and
+// optionally validFrom/validTo/temporalText/supersedesFactId
+// (hypothesisReflectionSync.js — set when this hypothesis, if confirmed,
+// replaces an existing fact rather than standing alone).
 export function createHypothesis(hypothese) {
   const body =
     typeof hypothese === "string"
@@ -111,6 +125,10 @@ export function createHypothesis(hypothese) {
           verificatieCriteria: hypothese.verificatieCriteria,
           bevestigingsCriteria: hypothese.bevestigingsCriteria,
           afwijzingsCriteria: hypothese.afwijzingsCriteria,
+          validFrom: hypothese.validFrom,
+          validTo: hypothese.validTo,
+          temporalText: hypothese.temporalText,
+          supersedesFactId: hypothese.supersedesFactId,
         };
   return memoryRequest("/hypotheses", {
     method: "POST",

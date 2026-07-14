@@ -88,6 +88,20 @@ function confirmHypothesis(hypothesis) {
   return { status: "confirmed", confirmedAt: new Date() };
 }
 
+// The fact row to insert when a hypothesis is confirmed — a pure mapping,
+// not a decision, so it belongs here rather than inline in the route.
+// Temporal scope and any supersession target are copied once, at this exact
+// moment, because a fact can never be edited afterward (see db/schema.ts).
+function buildFactFromHypothesis(hypothesis) {
+  return {
+    inhoud: hypothesis.hypothese,
+    validFrom: hypothesis.valid_from ?? hypothesis.validFrom ?? null,
+    validTo: hypothesis.valid_to ?? hypothesis.validTo ?? null,
+    temporalText: hypothesis.temporal_text ?? hypothesis.temporalText ?? null,
+    supersedesFactId: hypothesis.supersedes_fact_id ?? hypothesis.supersedesFactId ?? null,
+  };
+}
+
 // A rejection always needs a reason — mirrors persona_kenmerk's verwerp_reden,
 // the same "why" that keeps a rejection inspectable instead of a bare flag.
 function rejectHypothesis(hypothesis, { reden } = {}) {
@@ -137,6 +151,7 @@ module.exports = {
   canConfirm,
   canReject,
   confirmHypothesis,
+  buildFactFromHypothesis,
   rejectHypothesis,
   ALLOWED_GAP_TRANSITIONS,
   canTransitionKnowledgeGap,

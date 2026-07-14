@@ -8,6 +8,7 @@ import { getSettings } from "@/lib/settings";
 import { pollInbox } from "@/services/inboxSync";
 import { runAutomaticPersonaMaintenance } from "@/services/personaSync";
 import { detectHypothesisCandidates } from "@/services/hypothesisSync";
+import { reflectOnHypotheses } from "@/services/hypothesisReflectionSync";
 import { findRelatedLocal } from "@/services/weave";
 import { startUiaCaptureListener } from "@/services/uiaCapture";
 import { fetchSystemStatus } from "@/services/statusService";
@@ -118,6 +119,13 @@ export default function App() {
       const hypothesesFound = await detectHypothesisCandidates();
       if (hypothesesFound > 0) {
         toast.success(`Memory updated: ${hypothesesFound} new hypothesis observation${hypothesesFound === 1 ? "" : "s"}`);
+      }
+      // Reflection only ever proposes a new, "open" hypothesis (carrying
+      // supersedesFactId) — it never confirms one itself, so this can run
+      // freely in the same cycle without touching any existing fact.
+      const reflectionsProposed = await reflectOnHypotheses();
+      if (reflectionsProposed > 0) {
+        toast.success(`Memory reflection: ${reflectionsProposed} possible change${reflectionsProposed === 1 ? "" : "s"} to review`);
       }
     };
     const id = setInterval(run, 30 * 60 * 1000);

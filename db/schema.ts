@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   check,
   integer,
@@ -249,6 +250,19 @@ export const hypothesis = pgTable("hypothesis", {
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   rejectedAt: timestamp("rejected_at", { withTimezone: true }),
   verwerpReden: text("verwerp_reden"),
+  // Descriptive temporal scope of the claim itself (same meaning as
+  // persona_kenmerk's own validFrom/validTo/temporalText) — copied onto the
+  // resulting fact at confirmation, not re-derived later, since a fact can
+  // never be mutated after the fact.
+  validFrom: timestamp("valid_from", { withTimezone: true }),
+  validTo: timestamp("valid_to", { withTimezone: true }),
+  temporalText: text("temporal_text"),
+  // Set at creation (typically by the reflection pipeline, services/
+  // hypothesisReflectionSync.js) when this hypothesis, if confirmed, replaces
+  // an existing fact rather than standing alone. Copied onto the resulting
+  // fact at confirmation — see fact.supersedesFactId below for why this
+  // can't simply be computed later by mutating the old fact.
+  supersedesFactId: uuid("supersedes_fact_id").references(() => fact.id, { onDelete: "restrict" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -323,9 +337,26 @@ export const fact = pgTable(
     hypothesisId: uuid("hypothesis_id")
       .notNull()
       .references(() => hypothesis.id, { onDelete: "restrict" }),
+    // Copied from the confirming hypothesis at creation time — never set or
+    // changed afterward, since a fact row itself is never touched again.
+    validFrom: timestamp("valid_from", { withTimezone: true }),
+    validTo: timestamp("valid_to", { withTimezone: true }),
+    temporalText: text("temporal_text"),
+    // The fact this one replaces, if any — Chronicle's Hindsight-style
+    // temporal reflection (services/hypothesisReflectionSync.js) proposes a
+    // NEW hypothesis carrying this pointer rather than ever mutating the
+    // superseded fact's own row; only becomes real once a human explicitly
+    // confirms that hypothesis. Unique: a fact can be superseded by at most
+    // one successor, so two competing replacement hypotheses can't both
+    // succeed — the second confirm attempt hits this constraint and the
+    // whole transaction (see /hypotheses/:id/confirm) rolls back cleanly.
+    supersedesFactId: uuid("supersedes_fact_id").references((): AnyPgColumn => fact.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("fact_hypothesis_id_unique").on(table.hypothesisId)],
+  (table) => [
+    uniqueIndex("fact_hypothesis_id_unique").on(table.hypothesisId),
+    uniqueIndex("fact_supersedes_fact_id_unique").on(table.supersedesFactId),
+  ],
 );
 
 export const knowledgeGap = pgTable("knowledge_gap", {

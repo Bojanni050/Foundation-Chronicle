@@ -9,6 +9,7 @@ const {
   canConfirm,
   canReject,
   confirmHypothesis,
+  buildFactFromHypothesis,
   rejectHypothesis,
   canTransitionKnowledgeGap,
   transitionKnowledgeGap,
@@ -81,6 +82,27 @@ test("explicit confirm/reject: only allowed from 'open', reject requires a reaso
   const rejectPatch = rejectHypothesis(openForRejection, { reden: "contradicted by later evidence" });
   assert.strictEqual(rejectPatch.status, "rejected");
   assert.strictEqual(rejectPatch.verwerpReden, "contradicted by later evidence");
+});
+
+test("fact construction: temporal scope and supersession target copy once, from the DB row shape", () => {
+  const hypothesis = {
+    id: "h5",
+    hypothese: "user prefers dark ballads",
+    valid_from: null,
+    valid_to: null,
+    temporal_text: "since March 2026",
+    supersedes_fact_id: "fact_old",
+  };
+  const fact = buildFactFromHypothesis(hypothesis);
+  assert.strictEqual(fact.inhoud, "user prefers dark ballads");
+  assert.strictEqual(fact.temporalText, "since March 2026");
+  assert.strictEqual(fact.supersedesFactId, "fact_old");
+
+  // Also accepts the camelCase shape (e.g. a freshly-built object, not a raw
+  // pg row) so this stays usable outside the route too.
+  const camel = buildFactFromHypothesis({ hypothese: "x", temporalText: "always" });
+  assert.strictEqual(camel.temporalText, "always");
+  assert.strictEqual(camel.supersedesFactId, null);
 });
 
 test("knowledge gap transitions: only the declared forward moves are allowed", () => {

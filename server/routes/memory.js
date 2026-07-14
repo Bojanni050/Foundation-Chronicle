@@ -10,6 +10,7 @@ const { pool } = require("../db");
 const {
   isVerified,
   confirmHypothesis,
+  buildFactFromHypothesis,
   rejectHypothesis,
   transitionKnowledgeGap,
 } = require("../epistemicPolicy");
@@ -160,6 +161,20 @@ router.get("/episodes/:id", async (req, res) => {
   res.json(rows[0]);
 });
 
+// GET /api/memory/episodes?since=ISO — recently captured observations, for
+// the reflection pipeline (services/hypothesisReflectionSync.js) to scan
+// against currently-active facts. Without ?since, returns everything —
+// fine for small archives, but callers doing periodic reflection should
+// always pass their own last-run watermark.
+router.get("/episodes", async (req, res) => {
+  const { since } = req.query;
+  const query = since
+    ? { text: "SELECT * FROM episode WHERE captured_at > $1 ORDER BY captured_at ASC", values: [since] }
+    : { text: "SELECT * FROM episode ORDER BY captured_at ASC", values: [] };
+  const { rows } = await pool.query(query.text, query.values);
+  res.json(rows);
+});
+
 // GET /api/memory/sources/:bronObjectId/usage — read-only bridge across the
 // IndexedDB/PostgreSQL boundary. The frontend uses this before deleting an
 // object and to mark provenance links whose source object no longer exists.
@@ -198,13 +213,36 @@ router.get("/hypotheses", async (req, res) => {
 });
 
 // POST /api/memory/hypotheses
+// validFrom/validTo/temporalText describe the claim's own temporal scope —
+// copied onto the resulting fact at confirmation, never re-derived later.
+// supersedesFactId marks this hypothesis, if confirmed, as replacing an
+// existing fact (typically set by the reflection pipeline, services/
+// hypothesisReflectionSync.js) — several competing hypotheses may name the
+// same target; only the first one actually confirmed succeeds (see
+// /hypotheses/:id/confirm), so this is deliberately not exclusive at
+// creation time.
 router.post("/hypotheses", async (req, res) => {
-  const { hypothese, verificatieCriteria, bevestigingsCriteria, afwijzingsCriteria } = req.body || {};
+  const { hypothese, verificatieCriteria, bevestigingsCriteria, afwijzingsCriteria, validFrom, validTo, temporalText, supersedesFactId } =
+    req.body || {};
   if (!hypothese) return res.status(400).json({ error: "hypothese required" });
+  if (supersedesFactId) {
+    const { rows: factRows } = await pool.query("SELECT id FROM fact WHERE id = $1", [supersedesFactId]);
+    if (!factRows[0]) return res.status(404).json({ error: "supersedesFactId does not reference an existing fact" });
+  }
   const { rows } = await pool.query(
-    `INSERT INTO hypothesis (hypothese, verificatie_criteria, bevestigings_criteria, afwijzings_criteria)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
-    [hypothese, verificatieCriteria || null, bevestigingsCriteria || null, afwijzingsCriteria || null]
+    `INSERT INTO hypothesis
+       (hypothese, verificatie_criteria, bevestigings_criteria, afwijzings_criteria, valid_from, valid_to, temporal_text, supersedes_fact_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [
+      hypothese,
+      verificatieCriteria || null,
+      bevestigingsCriteria || null,
+      afwijzingsCriteria || null,
+      validFrom || null,
+      validTo || null,
+      temporalText || null,
+      supersedesFactId || null,
+    ]
   );
   res.status(201).json(rows[0]);
 });
@@ -230,9 +268,16 @@ router.get("/hypotheses/:id", async (req, res) => {
   res.json({ ...hyp, evidence: evidenceRows, verdict, fact: factRows[0] || null });
 });
 
-// GET /api/memory/facts — every confirmed hypothesis's resulting fact.
-router.get("/facts", async (_req, res) => {
-  const { rows } = await pool.query("SELECT * FROM fact ORDER BY created_at DESC");
+// GET /api/memory/facts?active=true — every confirmed hypothesis's
+// resulting fact. ?active=true restricts to facts nothing else has
+// superseded yet — the "currently effectively true" set the reflection
+// pipeline scans, so it never proposes replacing an already-replaced fact.
+router.get("/facts", async (req, res) => {
+  const query =
+    req.query.active === "true"
+      ? "SELECT * FROM fact WHERE id NOT IN (SELECT supersedes_fact_id FROM fact WHERE supersedes_fact_id IS NOT NULL) ORDER BY created_at DESC"
+      : "SELECT * FROM fact ORDER BY created_at DESC";
+  const { rows } = await pool.query(query);
   res.json(rows);
 });
 
@@ -300,10 +345,26 @@ router.patch("/hypotheses/:id/confirm", async (req, res, next) => {
       "UPDATE hypothesis SET status = $1, confirmed_at = $2 WHERE id = $3 RETURNING *",
       [patch.status, patch.confirmedAt, req.params.id]
     );
-    const { rows: factRows } = await client.query(
-      "INSERT INTO fact (inhoud, hypothesis_id) VALUES ($1, $2) RETURNING *",
-      [hyp.hypothese, req.params.id]
-    );
+    const newFact = buildFactFromHypothesis(hyp);
+    let factRows;
+    try {
+      ({ rows: factRows } = await client.query(
+        `INSERT INTO fact (inhoud, hypothesis_id, valid_from, valid_to, temporal_text, supersedes_fact_id)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [newFact.inhoud, req.params.id, newFact.validFrom, newFact.validTo, newFact.temporalText, newFact.supersedesFactId]
+      ));
+    } catch (err) {
+      // A competing hypothesis already superseded the same fact first — this
+      // confirmation loses the race. Roll back so the hypothesis itself
+      // reverts to "open" rather than ending up confirmed with no fact to
+      // show for it. Any other error is left uncaught here and handled by
+      // the outer catch below, same as every other failure in this route.
+      if (err.code === "23505" && /fact_supersedes_fact_id_unique/.test(err.message)) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: "the fact this hypothesis would supersede has already been superseded" });
+      }
+      throw err;
+    }
     await client.query("COMMIT");
     res.json({ ...updated[0], fact: factRows[0] });
   } catch (err) {
