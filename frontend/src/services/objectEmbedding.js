@@ -15,17 +15,25 @@ import { getSettings } from "@/lib/settings";
  * @param {string} content   flattened content, used for the object-level
  *   embedding and as the single-chunk fallback when turns is omitted
  */
-export async function embedObject(objectId, turns, content) {
+export async function embedObjectDetailed(objectId, turns, content, { signal } = {}) {
   const { apiUrl } = getSettings();
-  if (!apiUrl || !objectId) return false;
+  if (!apiUrl || !objectId) return { ok: false, error: "Local API or object id missing" };
   try {
     const res = await fetch(`${apiUrl}/api/objects/${objectId}/embed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ turns: Array.isArray(turns) ? turns : [], content: content || "" }),
+      signal,
     });
-    return res.ok;
-  } catch {
-    return false; // local server unreachable
+    const result = await res.json().catch(() => ({}));
+    return res.ok
+      ? { ok: result.objectEmbedded === true && result.chunksEmbedded === result.totalChunks, ...result }
+      : { ok: false, error: result.error || `Embedding request failed (${res.status})` };
+  } catch (err) {
+    return { ok: false, aborted: err.name === "AbortError", error: err.message || "Local server unreachable" };
   }
+}
+
+export async function embedObject(objectId, turns, content) {
+  return (await embedObjectDetailed(objectId, turns, content)).ok;
 }

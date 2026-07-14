@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Archive, Upload, Loader2, Check, X, Copy, Eye, EyeOff, RefreshCw, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getSettings, saveSettings, AI_FUNCTIONS } from "@/lib/settings";
@@ -12,7 +12,9 @@ import { startUiaCaptureListener, stopUiaCaptureListener } from "@/services/uiaC
 import { relTime } from "@/lib/format";
 import {
   buildChronicleBackup,
+  checkBackupReadiness,
   downloadChronicleBackup,
+  getLastBackupExport,
   mergeChronicleBackup,
   readChronicleBackupFile,
 } from "@/services/backupService";
@@ -21,6 +23,7 @@ import {
   purgeDerivedMemory,
   purgeOrphanAttachments,
 } from "@/services/maintenanceApi";
+import { rebuildSearchIndex } from "@/services/searchReindex";
 
 function formatBytes(value) {
   const bytes = Number(value || 0);
@@ -60,18 +63,26 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityDeletingId, setActivityDeletingId] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
+  const [backupHealthBusy, setBackupHealthBusy] = useState(false);
+  const [backupHealth, setBackupHealth] = useState(null);
+  const [lastBackupExport, setLastBackupExport] = useState(getLastBackupExport());
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [restoreCandidate, setRestoreCandidate] = useState(null);
   const [maintenance, setMaintenance] = useState(null);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [purgeTarget, setPurgeTarget] = useState(null);
   const [purgeBusy, setPurgeBusy] = useState(false);
+  const [reindex, setReindex] = useState(null);
+  const reindexAbort = useRef(null);
 
   const handleBackup = async () => {
     setBackupBusy(true);
     try {
       const backup = await buildChronicleBackup();
       downloadChronicleBackup(backup);
+      const recorded = getLastBackupExport();
+      setLastBackupExport(recorded);
+      setBackupHealth({ status: "current", lastExport: recorded, missingReferencedCount: 0 });
       const counts = backup.manifest.counts;
       toast.success(
         `Backup created: ${counts.objects} objects, ${counts.attachments} attachments, ${counts.episodes} episodes`,
@@ -80,6 +91,19 @@ export function SettingsDialog({ open, onOpenChange }) {
       toast.error(`Backup failed: ${err.message}`);
     } finally {
       setBackupBusy(false);
+    }
+  };
+
+  const handleBackupReadiness = async () => {
+    setBackupHealthBusy(true);
+    try {
+      const health = await checkBackupReadiness();
+      setBackupHealth(health);
+      setLastBackupExport(health.lastExport);
+    } catch (err) {
+      toast.error(`Backup readiness check failed: ${err.message}`);
+    } finally {
+      setBackupHealthBusy(false);
     }
   };
 
@@ -128,7 +152,7 @@ export function SettingsDialog({ open, onOpenChange }) {
   };
 
   const handlePurge = async () => {
-    if (!purgeTarget) return;
+    if (!purgeTarget || reindex?.running) return;
     setPurgeBusy(true);
     try {
       const result = purgeTarget === "attachments"
@@ -147,6 +171,37 @@ export function SettingsDialog({ open, onOpenChange }) {
       setPurgeBusy(false);
     }
   };
+
+  const handleReindex = async (force) => {
+    if (purgeBusy) return;
+    setPurgeTarget(null);
+    const controller = new AbortController();
+    reindexAbort.current = controller;
+    setReindex({ running: true, total: 0, completed: 0, succeeded: 0, failed: 0, failures: [] });
+    try {
+      const result = await rebuildSearchIndex({
+        force,
+        signal: controller.signal,
+        onProgress: (progress) => setReindex({ ...progress, running: true }),
+      });
+      setReindex({ ...result, running: false });
+      if (result.cancelled) {
+        toast("Search rebuild cancelled. A later repair run will resume remaining objects.");
+      } else if (result.failed) {
+        toast.error(`Search rebuild completed with ${result.failed} failed object${result.failed === 1 ? "" : "s"}`);
+      } else {
+        toast.success(`Search index ready: ${result.succeeded} object${result.succeeded === 1 ? "" : "s"} rebuilt`);
+      }
+      await refreshMaintenance();
+    } catch (err) {
+      setReindex((current) => ({ ...current, running: false, fatalError: err.message }));
+      toast.error(`Search rebuild failed: ${err.message}`);
+    } finally {
+      reindexAbort.current = null;
+    }
+  };
+
+  const cancelReindex = () => reindexAbort.current?.abort();
 
   const handleSeed = async () => {
     setSeedBusy(true);
@@ -224,6 +279,7 @@ export function SettingsDialog({ open, onOpenChange }) {
   useEffect(() => {
     if (open) {
       setS(getSettings());
+      setLastBackupExport(getLastBackupExport());
       setTestState(null);
       setTestMsg("");
       const cached = getCachedOpenRouterModels();
@@ -743,6 +799,37 @@ export function SettingsDialog({ open, onOpenChange }) {
               {backupBusy ? "Building complete backup…" : "Export complete backup"}
             </button>
 
+            <div className="rounded-lg border border-border bg-card/40 p-3 space-y-2" data-testid="backup-readiness">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-medium text-ink">Backup readiness</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {lastBackupExport
+                      ? `Last archive generated ${new Date(lastBackupExport.createdAt).toLocaleString()}`
+                      : "No successfully generated archive recorded in this browser."}
+                  </p>
+                </div>
+                <button
+                  onClick={handleBackupReadiness}
+                  disabled={backupHealthBusy || backupBusy || restoreBusy}
+                  data-testid="check-backup-readiness-btn"
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-ink hover:bg-accent disabled:opacity-40"
+                >
+                  {backupHealthBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {backupHealthBusy ? "Checking sources…" : "Check freshness"}
+                </button>
+              </div>
+              {backupHealth && (
+                <p className={`text-xs ${backupHealth.status === "blocked" || backupHealth.status === "outdated" ? "text-destructive" : "text-muted-foreground"}`}>
+                  {backupHealth.status === "current" && "Current — objects and memory match the last generated archive."}
+                  {backupHealth.status === "outdated" && "New or changed data exists since the last generated archive."}
+                  {backupHealth.status === "blocked" && `Blocked — ${backupHealth.missingReferencedCount} referenced attachment file${backupHealth.missingReferencedCount === 1 ? " is" : "s are"} missing.`}
+                  {backupHealth.status === "never" && "No baseline exists yet. Generate a complete backup."}
+                  {backupHealth.status === "unknown" && "The previous export predates freshness fingerprints. Generate a new backup baseline."}
+                </p>
+              )}
+            </div>
+
             <div className="rounded-lg border border-border bg-card/40 p-3 space-y-3">
               <div>
                 <p className="text-sm font-medium text-ink">Restore from backup</p>
@@ -798,7 +885,7 @@ export function SettingsDialog({ open, onOpenChange }) {
             </div>
             <button
               onClick={refreshMaintenance}
-              disabled={maintenanceLoading || purgeBusy}
+              disabled={maintenanceLoading || purgeBusy || reindex?.running}
               data-testid="scan-storage-btn"
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-ink hover:bg-accent disabled:opacity-40 transition-colors"
             >
@@ -830,7 +917,7 @@ export function SettingsDialog({ open, onOpenChange }) {
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => setPurgeTarget("attachments")}
-                    disabled={purgeBusy || maintenance.attachments.orphanCount === 0}
+                    disabled={purgeBusy || reindex?.running || maintenance.attachments.orphanCount === 0}
                     data-testid="purge-orphan-attachments-btn"
                     className="inline-flex items-center gap-2 rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-40 transition-colors"
                   >
@@ -839,13 +926,76 @@ export function SettingsDialog({ open, onOpenChange }) {
                   </button>
                   <button
                     onClick={() => setPurgeTarget("derived")}
-                    disabled={purgeBusy || (maintenance.memory.object_chunks === 0 && maintenance.memory.object_embeddings === 0)}
+                    disabled={purgeBusy || reindex?.running || (maintenance.memory.object_chunks === 0 && maintenance.memory.object_embeddings === 0)}
                     data-testid="purge-derived-memory-btn"
                     className="inline-flex items-center gap-2 rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-40 transition-colors"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     Purge derived search data
                   </button>
+                </div>
+
+                <div className="rounded-md border border-border bg-card/40 p-3 space-y-3" data-testid="search-reindex-panel">
+                  <div>
+                    <p className="text-xs font-medium text-ink">Search index recovery</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                      Repair processes only missing, incomplete, or older indexes. Rebuild all is useful after changing the embedding model.
+                      Completed objects are detected automatically, so an interrupted repair can be resumed safely.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => handleReindex(false)}
+                      disabled={reindex?.running || purgeBusy || !!purgeTarget}
+                      data-testid="repair-search-index-btn"
+                      className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-ink hover:bg-accent disabled:opacity-40 transition-colors"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 text-primary ${reindex?.running ? "animate-spin" : ""}`} />
+                      Repair missing or stale
+                    </button>
+                    <button
+                      onClick={() => handleReindex(true)}
+                      disabled={reindex?.running || purgeBusy || !!purgeTarget}
+                      data-testid="rebuild-all-search-index-btn"
+                      className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-ink hover:bg-accent disabled:opacity-40 transition-colors"
+                    >
+                      Rebuild all
+                    </button>
+                    {reindex?.running && (
+                      <button
+                        onClick={cancelReindex}
+                        className="rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10"
+                        data-testid="cancel-search-reindex-btn"
+                      >
+                        Cancel after current request
+                      </button>
+                    )}
+                  </div>
+
+                  {reindex && (
+                    <div className="space-y-2 text-[11px]" data-testid="search-reindex-progress">
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full bg-primary transition-all"
+                          style={{ width: `${reindex.total ? Math.round((reindex.completed / reindex.total) * 100) : reindex.running ? 0 : 100}%` }}
+                        />
+                      </div>
+                      <p className="text-muted-foreground">
+                        {reindex.currentTitle && `Processing “${reindex.currentTitle}” · `}
+                        {reindex.completed}/{reindex.total} completed · {reindex.succeeded} succeeded · {reindex.failed} failed
+                      </p>
+                      {reindex.cancelled && <p className="text-muted-foreground">Cancelled safely; run repair again to resume.</p>}
+                      {reindex.fatalError && <p className="text-destructive">{reindex.fatalError}</p>}
+                      {reindex.failures?.slice(0, 3).map((failure) => (
+                        <p key={failure.id} className="text-destructive">
+                          {failure.title}: {failure.error}
+                        </p>
+                      ))}
+                      {reindex.failures?.length > 3 && (
+                        <p className="text-destructive">And {reindex.failures.length - 3} more failures.</p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {purgeTarget && (
@@ -861,7 +1011,7 @@ export function SettingsDialog({ open, onOpenChange }) {
                     <div className="flex gap-2">
                       <button
                         onClick={handlePurge}
-                        disabled={purgeBusy}
+                        disabled={purgeBusy || reindex?.running}
                         data-testid="confirm-purge-btn"
                         className="inline-flex items-center gap-2 rounded-md bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground disabled:opacity-40"
                       >

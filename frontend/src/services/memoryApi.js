@@ -55,6 +55,10 @@ export function getMemoryStorageInventory() {
   return memoryRequest("/maintenance/storage");
 }
 
+export function getObjectIndexInventory() {
+  return memoryRequest("/maintenance/object-indexes");
+}
+
 export function purgeDerivedMemory() {
   return memoryRequest("/maintenance/purge-derived", {
     method: "POST",

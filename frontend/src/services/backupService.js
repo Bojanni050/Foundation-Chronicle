@@ -2,9 +2,11 @@ import { objectRepository } from "@/repositories";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { getCustomTypes, mergeCustomTypes, setCustomTypes } from "@/lib/typeRegistry";
 import { exportMemory, restoreMemory } from "@/services/memoryApi";
+import { loadDataInventory } from "@/services/maintenanceApi";
 
 export const BACKUP_FORMAT = "foundation-chronicle-backup";
 export const BACKUP_VERSION = 1;
+const LAST_BACKUP_KEY = "chronicle_last_backup_export";
 
 function bytesToBase64(bytes) {
   let binary = "";
@@ -31,6 +33,76 @@ async function sha256(value) {
   const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function sourceFingerprints(objects, customTypes, workspace, memory) {
+  return {
+    objects: await sha256(JSON.stringify({ objects, customTypes, workspace })),
+    memory: await sha256(JSON.stringify(memory.tables || {})),
+  };
+}
+
+export function getLastBackupExport() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LAST_BACKUP_KEY) || "null");
+    return value?.createdAt ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordBackupExport(backup) {
+  try {
+    localStorage.setItem(LAST_BACKUP_KEY, JSON.stringify({
+      createdAt: backup.manifest.createdAt,
+      contentSha256: backup.manifest.contentSha256,
+      counts: backup.manifest.counts,
+      sourceFingerprints: backup.manifest.sourceFingerprints,
+    }));
+  } catch {
+    // Export itself remains valid when operational metadata cannot be stored.
+  }
+}
+
+export function classifyBackupReadiness(lastExport, currentFingerprints, missingReferencedCount) {
+  if (missingReferencedCount > 0) return "blocked";
+  if (!lastExport?.sourceFingerprints) return lastExport ? "unknown" : "never";
+  if (lastExport.sourceFingerprints.objects !== currentFingerprints.objects
+      || lastExport.sourceFingerprints.memory !== currentFingerprints.memory) return "outdated";
+  return "current";
+}
+
+export async function checkBackupReadiness() {
+  const settings = getSettings();
+  const [objects, memory, inventory] = await Promise.all([
+    objectRepository.list(),
+    exportMemory(),
+    loadDataInventory(),
+  ]);
+  const customTypes = getCustomTypes();
+  const workspace = { name: settings.workspaceName || "Personal workspace" };
+  const fingerprints = await sourceFingerprints(objects, customTypes, workspace, memory);
+  const lastExport = getLastBackupExport();
+  const invalidAttachmentReferences = objects.reduce(
+    (count, object) => count + (object.attachments || []).filter((attachment) => !/^[a-f0-9]{24}$/.test(attachment.id || "")).length,
+    0,
+  );
+  const missingReferencedCount = (inventory.attachments.missingReferencedCount || 0) + invalidAttachmentReferences;
+  return {
+    status: classifyBackupReadiness(
+      lastExport,
+      fingerprints,
+      missingReferencedCount,
+    ),
+    lastExport,
+    missingReferencedCount,
+    missingReferencedIds: inventory.attachments.missingReferencedIds || [],
+    currentCounts: {
+      objects: objects.length,
+      attachments: inventory.referencedAttachments,
+      episodes: memory.tables?.episodes?.length || 0,
+    },
+  };
 }
 
 async function exportAttachments(objects, apiUrl) {
@@ -183,6 +255,8 @@ export async function buildChronicleBackup() {
   const [objects, memory] = await Promise.all([objectRepository.list(), exportMemory()]);
   const customTypes = getCustomTypes();
   const attachments = await exportAttachments(objects, settings.apiUrl);
+  const workspace = { name: settings.workspaceName || "Personal workspace" };
+  const fingerprints = await sourceFingerprints(objects, customTypes, workspace, memory);
 
   const backup = {
     manifest: {
@@ -204,8 +278,9 @@ export async function buildChronicleBackup() {
         hypotheses: memory.tables?.hypotheses?.length || 0,
         evidence: memory.tables?.evidence?.length || 0,
       },
+      sourceFingerprints: fingerprints,
     },
-    workspace: { name: settings.workspaceName || "Personal workspace" },
+    workspace,
     customTypes,
     objects,
     attachments,
@@ -226,5 +301,6 @@ export function downloadChronicleBackup(backup) {
   document.body.appendChild(link);
   link.click();
   link.remove();
+  recordBackupExport(backup);
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }

@@ -82,6 +82,15 @@ Settings → **Data management** reports attachment usage and rebuildable search
 storage before changing anything. Orphan attachment files and derived object
 chunks/embeddings have separate two-step purge controls. These controls never
 delete source objects, knowledge, hypotheses, evidence, or immutable episodes.
+Missing or stale object indexes can be repaired incrementally from IndexedDB;
+completed objects are skipped on subsequent runs, while a full rebuild remains
+available after changing the local embedding model.
+
+Archive backup also records a local operational baseline (never included as a
+secret). The readiness check compares current object and PostgreSQL source
+fingerprints with that baseline and blocks a healthy result when referenced
+attachment files are missing. Chronicle calls this the last generated export,
+because browser download APIs cannot prove where a file was ultimately saved.
 
 ### 🔐 Local Username & PIN Lock Screen
 * Secure your local workspace. On first launch, set up a username and choose a 4-to-6 digit security PIN code.

@@ -87,7 +87,9 @@ router.post("/restore/:id", requireAuth, express.raw({ type: "*/*", limit: "25mb
 router.post("/inventory", requireAuth, (req, res) => {
   const referencedIds = Array.isArray(req.body?.referencedIds) ? req.body.referencedIds : [];
   const attachments = listAttachments();
+  const availableIds = new Set(attachments.map((attachment) => attachment.id));
   const orphanIds = new Set(findOrphanAttachmentIds(attachments, referencedIds));
+  const missingReferencedIds = [...new Set(referencedIds.filter((id) => !availableIds.has(id)))];
   const orphanBytes = attachments
     .filter((attachment) => orphanIds.has(attachment.id))
     .reduce((total, attachment) => total + Number(attachment.size || 0), 0);
@@ -96,6 +98,8 @@ router.post("/inventory", requireAuth, (req, res) => {
     totalBytes: attachments.reduce((total, attachment) => total + Number(attachment.size || 0), 0),
     orphanCount: orphanIds.size,
     orphanBytes,
+    missingReferencedCount: missingReferencedIds.length,
+    missingReferencedIds,
   });
 });
 

@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { buildMemoryExport } = require("../server/memoryExport");
 const { restoreMemoryWithClient } = require("../server/memoryRestore");
-const { getMemoryStorageInventory } = require("../server/memoryMaintenance");
+const { getMemoryStorageInventory, getObjectIndexInventory } = require("../server/memoryMaintenance");
 
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 
@@ -103,6 +103,17 @@ try {
   assert.ok(storageInventory.episodes >= 2);
   assert.ok(storageInventory.evidence >= 3);
   assert.ok(Number(storageInventory.derived_bytes) >= 0);
+
+  const indexObjectId = `obj_index_${randomUUID()}`;
+  await client.query(
+    "INSERT INTO object_chunk (object_id, content, order_index) VALUES ($1, $2, 0)",
+    [indexObjectId, "integration test chunk"],
+  );
+  await client.query("INSERT INTO object_embedding (object_id) VALUES ($1)", [indexObjectId]);
+  const indexInventory = await getObjectIndexInventory(client);
+  const indexedObject = indexInventory.find((row) => row.object_id === indexObjectId);
+  assert.equal(indexedObject.chunk_count, 1);
+  assert.equal(indexedObject.embedded_chunk_count, 0);
 
   await client.query("SAVEPOINT duplicate_evidence");
   try {

@@ -16,7 +16,11 @@ const {
 const { prepareEpisodeInput } = require("../episodePolicy");
 const { buildMemoryExport } = require("../memoryExport");
 const { restoreMemory } = require("../memoryRestore");
-const { getMemoryStorageInventory, purgeDerivedMemory } = require("../memoryMaintenance");
+const {
+  getMemoryStorageInventory,
+  getObjectIndexInventory,
+  purgeDerivedMemory,
+} = require("../memoryMaintenance");
 
 const router = express.Router();
 
@@ -49,6 +53,14 @@ router.post("/restore", async (req, res, next) => {
 router.get("/maintenance/storage", async (_req, res, next) => {
   try {
     res.json(await getMemoryStorageInventory(pool));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/maintenance/object-indexes", async (_req, res, next) => {
+  try {
+    res.json(await getObjectIndexInventory(pool));
   } catch (err) {
     next(err);
   }

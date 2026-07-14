@@ -13,6 +13,20 @@ async function getMemoryStorageInventory(pool) {
   return rows[0];
 }
 
+async function getObjectIndexInventory(pool) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(oe.object_id, oc.object_id) AS object_id,
+       oe.created_at AS object_indexed_at,
+       COUNT(oc.id)::int AS chunk_count,
+       COUNT(oc.embedding)::int AS embedded_chunk_count
+     FROM object_embedding oe
+     FULL OUTER JOIN object_chunk oc ON oc.object_id = oe.object_id
+     GROUP BY COALESCE(oe.object_id, oc.object_id), oe.created_at
+     ORDER BY COALESCE(oe.object_id, oc.object_id)`,
+  );
+  return rows;
+}
+
 async function purgeDerivedMemory(pool, confirmation) {
   if (confirmation !== "PURGE_DERIVED_MEMORY") {
     throw new TypeError("explicit derived-memory purge confirmation required");
@@ -32,4 +46,4 @@ async function purgeDerivedMemory(pool, confirmation) {
   }
 }
 
-module.exports = { getMemoryStorageInventory, purgeDerivedMemory };
+module.exports = { getMemoryStorageInventory, getObjectIndexInventory, purgeDerivedMemory };
