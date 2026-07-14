@@ -2,23 +2,8 @@ const express = require("express");
 const { TOKEN } = require("../auth");
 const { getModel: getEmbeddingModel, setModel: setEmbeddingModel, MODEL_OPTIONS } = require("../embedding");
 const { reembedAllRows } = require("../reembed");
-const { getGaiaHermesConfig } = require("../gaia-backend/gaiaHermesManager");
 
 const router = express.Router();
-
-// GET /api/settings/gaia-hermes-config — url + key for Gaia's self-contained
-// Hermes backend. Read fresh from the backend's own .env on every request
-// rather than ever persisting the key in frontend localStorage — the prior
-// chatEndpoint/chatKey mechanism cached stale client-side values and that
-// caused persistent errors.
-router.get("/gaia-hermes-config", (_req, res) => {
-  res.json(getGaiaHermesConfig());
-});
-
-// gaia-hermes/chat/completions used to be proxied from here too. Removed —
-// routes/gaiaHermesProxy.js (mounted at /api/settings/gaia-hermes) is now
-// the single implementation; it also carries session tracking, reasoning
-// capture, and the enabled-skills policy gate that this older copy lacked.
 
 // GET /api/settings/token
 router.get("/token", (_req, res) => {
@@ -54,7 +39,7 @@ router.patch("/embedding-model", (req, res) => {
 router.post("/seed", async (req, res) => {
   const { pool } = require("../db");
   const { embed } = require("../embedding");
-  
+
   try {
     // 1. Clear existing traits & cache
     await pool.query("DELETE FROM persona_kenmerk_gebruik");
@@ -120,7 +105,7 @@ router.post("/seed", async (req, res) => {
       } catch (err) {
         console.error(`seeding embedding failed for "${t.kenmerk}":`, err.message);
       }
-      
+
       const { rows } = await pool.query(
         `INSERT INTO persona_kenmerk (
           kenmerk, soort, status, zekerheid, temporal_text, bron_object_ids, verwerp_reden, embedding

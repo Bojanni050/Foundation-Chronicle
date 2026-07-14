@@ -193,9 +193,9 @@ export function AIWeave({ selectedObject, allObjects, onOpen, onRefreshInbox, sy
         )}
       </div>
 
-      {/* Extracted knowledge — split the same way as Gaia's live panel:
-          persona claims (trust-ladder) vs. general facts/concepts (plain
-          kennis objects). On-demand extraction, not automatic per view. */}
+      {/* Extracted knowledge — split into persona claims (trust-ladder) vs.
+          general facts/concepts (plain kennis objects). On-demand
+          extraction, not automatic per view. */}
       {selectedObject && (
         <div className="border-t border-border px-4 pt-3 pb-1">
           <div className="flex items-center gap-1.5 pb-2">

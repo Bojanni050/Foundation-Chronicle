@@ -64,10 +64,6 @@ An interactive visual diagnostic panel with four views:
 * Integrated CORS proxy router queries your local Screenpipe database (`localhost:3030`) for OCR screen logs and audio transcriptions.
 * AI extracts promising ideas and tasks, presenting them in an interactive checklist where you can edit titles/descriptions, switch types, and import them with one click.
 
-### 💬 Context-Aware Hermes Chat Agent
-* Dedicated AI settings allowing you to define a custom OpenAI-compatible completions endpoint (e.g. `https://hermes-agent.nousresearch.com/v1` or a local `hermes gateway` on `http://localhost:8642/v1`) and bearer keys.
-* Automatically fetches confirmed memory/persona traits from PostgreSQL and injects them dynamically into the system prompt, providing Hermes with your developer persona context during the chat.
-
 ### 🛠️ Developer Timeline Demo Seeder
 * Instantly populates the app with simulated history (IndexedDB developer timelines from January to April 2026) and server-side PostgreSQL persona traits with local ONNX embeddings precalculated.
 * Activated via the "Seed Developer Timeline" button in Settings.

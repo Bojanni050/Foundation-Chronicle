@@ -12,8 +12,6 @@ import {
   Waypoints,
   Cpu,
   Lock,
-  MessageSquare,
-  Bot,
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
 import { useTypes } from "@/hooks/useTypes";
@@ -58,9 +56,7 @@ export function Sidebar({
   onSearch,
   onPulse,
   pulseBusy,
-  onChat,
   onPersona,
-  onSpecialist,
   onGraph,
   onEngine,
   onLock,
@@ -213,9 +209,7 @@ export function Sidebar({
           testId="nav-pulse"
           iconClassName={pulseBusy ? "animate-pulse" : ""}
         />
-        <NavRow icon={MessageSquare} label="AI Chat (Gaia)" active={false} onClick={onChat} testId="nav-chat" />
         <NavRow icon={Fingerprint} label="Persona" active={false} onClick={onPersona} testId="nav-persona" />
-        <NavRow icon={Bot} label="AI Specialists" active={false} onClick={onSpecialist} testId="nav-specialist" />
         <NavRow icon={Waypoints} label="Knowledge graph" active={false} onClick={onGraph} testId="nav-graph" />
         <NavRow icon={Cpu} label="Chronicle Engine" active={false} onClick={onEngine} testId="nav-engine" />
         <NavRow icon={Lock} label="Lock workspace" active={false} onClick={onLock} testId="nav-lock" />

@@ -36,10 +36,6 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [seedBusy, setSeedBusy] = useState(false);
   const [ggufPath, setGgufPath] = useState("");
   const [ggufSaveState, setGgufSaveState] = useState(null); // null | saving | saved
-  const [hermesSkills, setHermesSkills] = useState([]);
-  const [hermesSkillsLoading, setHermesSkillsLoading] = useState(false);
-  const [hermesSkillsSaving, setHermesSkillsSaving] = useState("");
-  const [hermesSkillsError, setHermesSkillsError] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
   const [activityObjects, setActivityObjects] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
@@ -128,48 +124,9 @@ export function SettingsDialog({ open, onOpenChange }) {
       setModelsFetchedAt(cached.fetchedAt);
       loadEmbeddingModel();
       invokeTauri("get_local_model_path").then((p) => setGgufPath(p || ""));
-      loadHermesSkills();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-
-  const loadHermesSkills = async () => {
-    setHermesSkillsLoading(true);
-    setHermesSkillsError("");
-    try {
-      const res = await fetch(`${getSettings().apiUrl}/api/settings/gaia-hermes/skills`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setHermesSkills(Array.isArray(data.skills) ? data.skills : []);
-    } catch (err) {
-      setHermesSkills([]);
-      setHermesSkillsError(`Hermes-skills konden niet worden geladen (${err.message}).`);
-    }
-    setHermesSkillsLoading(false);
-  };
-
-  const toggleHermesSkill = async (name, enabled) => {
-    const previous = hermesSkills;
-    const next = hermesSkills.map((skill) => (skill.name === name ? { ...skill, enabled } : skill));
-    setHermesSkills(next);
-    setHermesSkillsSaving(name);
-    setHermesSkillsError("");
-    try {
-      const enabledMap = Object.fromEntries(next.map((skill) => [skill.name, skill.enabled === true]));
-      const res = await fetch(`${getSettings().apiUrl}/api/settings/gaia-hermes/skills`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: enabledMap }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setHermesSkills(Array.isArray(data.skills) ? data.skills : next);
-    } catch (err) {
-      setHermesSkills(previous);
-      setHermesSkillsError(`Skillinstelling kon niet worden opgeslagen (${err.message}).`);
-    }
-    setHermesSkillsSaving("");
-  };
 
   // Native activity capture, embedded directly in the Tauri app — see
   // src-tauri/src/uia_capture.rs. No server-side toggle/route: unlike the
@@ -543,98 +500,12 @@ export function SettingsDialog({ open, onOpenChange }) {
 
           <div className="border-t border-border" />
 
-          {/* Gaia's self-contained Hermes backend */}
-          <section className="space-y-4">
-            <h3 className="font-serif text-base text-ink">Gaia's Hermes-backend</h3>
-            <p className="text-xs text-muted-foreground">
-              Routes Gaia's own chat turn through her self-contained Hermes instance (terminal/file tool access)
-              instead of OpenRouter directly. Off by default. If the backend is unreachable when this is on, chat
-              fails with a clear error rather than silently falling back — no cached URL/key is ever stored here.
-            </p>
-            <label className="flex items-center gap-2 text-sm text-ink">
-              <input
-                type="checkbox"
-                data-testid="gaia-hermes-toggle"
-                checked={!!s.gaiaHermesEnabled}
-                onChange={(e) => update({ gaiaHermesEnabled: e.target.checked })}
-                className="h-4 w-4 rounded border-border"
-              />
-              Route Gaia's chat through her Hermes-backend
-            </label>
-
-            <div className="pt-2 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Hermes skills
-                </label>
-                <button
-                  type="button"
-                  onClick={loadHermesSkills}
-                  disabled={hermesSkillsLoading}
-                  data-testid="refresh-hermes-skills-btn"
-                  className="text-muted-foreground hover:text-ink disabled:opacity-40"
-                  title="Skills opnieuw uitlezen uit Hermes"
-                >
-                  {hermesSkillsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-              <p className="text-[11px] text-muted-foreground/70">
-                Alleen aangevinkte skills worden aan Gaia aangeboden. Nieuwe Hermes-skills staan standaard uit.
-              </p>
-              {hermesSkillsError && (
-                <p className="text-xs text-destructive" data-testid="hermes-skills-error">{hermesSkillsError}</p>
-              )}
-              {!hermesSkillsLoading && !hermesSkillsError && hermesSkills.length === 0 && (
-                <p className="text-xs text-muted-foreground">Hermes heeft geen skills gerapporteerd.</p>
-              )}
-              <div className="space-y-1.5">
-                {hermesSkills.map((skill) => (
-                  <label
-                    key={skill.name}
-                    className="flex items-start gap-2.5 rounded-lg border border-border bg-card/40 px-3 py-2 hover:bg-card/70"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={skill.enabled === true}
-                      disabled={hermesSkillsSaving === skill.name}
-                      onChange={(e) => toggleHermesSkill(skill.name, e.target.checked)}
-                      data-testid={`hermes-skill-${skill.name}`}
-                      className="mt-0.5 h-4 w-4 rounded border-border"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2 text-sm text-ink">
-                        {skill.label || skill.name}
-                        {hermesSkillsSaving === skill.name && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      </span>
-                      <span className="mt-0.5 block text-[11px] text-muted-foreground">{skill.description || skill.name}</span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <div className="border-t border-border" />
-
           {/* Per-function models */}
           <section className="space-y-4">
             <h3 className="font-serif text-base text-ink">Models per function</h3>
             <p className="text-xs text-muted-foreground">
               Each AI feature can use its own model. Fetch OpenRouter's catalog above to see live pricing and capabilities here.
             </p>
-            <Field
-              label="Live Gaia consolidation"
-              hint="While a Gaia conversation stays open, scan it for persona kenmerken every N exchanges (0 disables this — it still gets scanned normally once saved/closed)."
-            >
-              <input
-                type="number"
-                min="0"
-                data-testid="gaia-consolidate-every-n"
-                value={s.gaiaConsolidateEveryNTurns}
-                onChange={(e) => update({ gaiaConsolidateEveryNTurns: Math.max(0, parseInt(e.target.value, 10) || 0) })}
-                className="w-24 rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
-              />
-            </Field>
             {AI_FUNCTIONS.map((fn) => {
               const current = s.models[fn.key];
               const inList = models.some((m) => m.id === current);

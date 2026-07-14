@@ -41,7 +41,7 @@ export const soortKenmerkEnum = pgEnum("soort_kenmerk", ["feit", "patroon"]);
 // categories of the same underlying concept (a piece of extracted knowledge,
 // evidenced by objects, moving through the same observation→hypothesis→
 // confirmed→rejected ladder). "persona" = a claim about the owner. "skill" =
-// a reusable procedure/workflow Gaia has picked up on. "algemeen" = a fact or
+// a reusable procedure/workflow picked up on. "algemeen" = a fact or
 // concept from content that isn't about the owner at all. Consolidation and
 // resurrection only ever compare within the same categorie — a persona trait
 // never merges with a general fact just because the text happens to overlap.
@@ -143,32 +143,6 @@ export const kennisGebruik = pgTable("persona_kenmerk_gebruik", {
   gebruiktOp: timestamp("gebruikt_op", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// A pending "Gaia wants to talk about this" flag — deliberately its own
-// table, not a sixth statusMarkeringEnum value. status_markering is a
-// documented five-value vocabulary (Manifest V6 §5, see above); a proactive
-// topic isn't a kenmerk's own lifecycle state, it's a note pointing at one
-// or two kenmerken that a human needs to look at. Two producers today: the
-// background consolidator (kind "contradiction", when two candidate-merge
-// kenmerken turn out to actually disagree rather than just being similar
-// text) and new-kenmerk insertion (kind "notable_fact", a single
-// high-confidence factual claim worth surfacing immediately). resolvedAt is
-// a plain timestamp, not a workflow state, matching this schema's existing
-// preference for simple flags (e.g. persona_instelling) over multi-step
-// status machines for anything that isn't the core kenmerk ladder itself.
-export const gaiaTopicKindEnum = pgEnum("gaia_topic_kind", ["contradiction", "notable_fact"]);
-
-export const gaiaProactiveTopic = pgTable("gaia_proactive_topic", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  kind: gaiaTopicKindEnum("kind").notNull(),
-  // Gaia's opening line, already fully composed — the frontend displays this
-  // as-is as the first message when the floating chat auto-opens, no further
-  // LLM call needed to phrase it.
-  summary: text("summary").notNull(),
-  kenmerkIds: uuid("kenmerk_ids").array().notNull().default([]),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
-});
-
 // --------------------------------------------------------------------------
 // Generic content-search layer — same local Qwen3-Embedding-0.6B (1024 dims)
 // as persona_kenmerk. Two granularities on purpose: a chunk-level hit tells
@@ -206,39 +180,3 @@ export const objectEmbedding = pgTable("object_embedding", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// --------------------------------------------------------------------------
-// Specialist sub-agents — same observation/confirmed vocabulary as
-// persona_kenmerk (statusMarkeringEnum), because becoming a specialist is
-// the same kind of claim: "you work with X a lot" is an inferred pattern
-// about the owner, not a fact stated once, so it needs the same explicit
-// confirmation before it's allowed to actually influence anything.
-//
-// Purpose: Gaia (the main chat agent) is offered each confirmed specialist
-// as a callable tool rather than stuffing all context into Gaia's own system
-// prompt on every turn. Gaia only delegates when a question actually touches
-// that topic, and only the specialist's short answer returns to Gaia's
-// context — not the raw bronObjectIds material. That's the whole point:
-// narrow, deep context lives with the specialist, not the orchestrator.
-// --------------------------------------------------------------------------
-export const specialist = pgTable("specialist", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  onderwerp: text("onderwerp").notNull(), // e.g. "Figma workflows"
-  status: statusMarkeringEnum("status").notNull().default("observation"),
-  // Chronicle object ids (activity/chat/etc, app-generated strings) that
-  // evidenced this pattern — same text-array, no-FK convention as
-  // persona_kenmerk.bron_object_ids.
-  bronObjectIds: text("bron_object_ids").array().notNull().default([]),
-  // Same rejection-provenance fields as persona_kenmerk (Manifest §5) — a
-  // specialist follows the same trust vocabulary, so the same distinction
-  // and resurrection path applies here too.
-  verwerpBron: verwerpBronEnum("verwerp_bron"),
-  voorgangerId: uuid("voorganger_id"),
-  // AI-authored on confirmation, but always visible and editable by the
-  // owner afterward — never a silent, opaque prompt.
-  systemPrompt: text("system_prompt"),
-  // Per-specialist model override. Null = use the specialist default from
-  // Settings (AI_FUNCTIONS "specialist" key).
-  model: text("model"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
-});

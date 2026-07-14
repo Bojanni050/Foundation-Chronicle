@@ -95,7 +95,7 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       // Generic "when was this last processed" watermark — not scoped to any
       // one pipeline. Compared against updatedAt by any process that wants
       // to skip re-processing unchanged content (currently: persona
-      // detection's full scan and Gaia's live consolidation).
+      // detection's full scan).
       processedAt: data.processedAt || null,
       locked: data.locked === true,
       createdAt: data.createdAt || now,

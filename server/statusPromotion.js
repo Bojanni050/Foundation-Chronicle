@@ -1,14 +1,14 @@
-const ALLOWED_TABLES = new Set(["persona_kenmerk", "specialist"]);
+const ALLOWED_TABLES = new Set(["persona_kenmerk"]);
 
 /**
  * Chronicle Manifest V6, §5: "Een `rejected`-record mag nooit, via welke
  * rekenkundige weg dan ook, stilzwijgend promoveren." This is the one place
  * that guarantee is enforced — every status-writing code path (the
  * consolidator, versterk/reinforce, samenvoegen, reflectie, and confirm/
- * reject routes on both persona_kenmerk and specialist) must call this
- * BEFORE writing a new status, instead of each route/job re-implementing
- * its own check. A single shared guard is the point of this function: fix
- * the rule once here, not once per caller.
+ * reject routes on persona_kenmerk) must call this BEFORE writing a new
+ * status, instead of each route/job re-implementing its own check. A single
+ * shared guard is the point of this function: fix the rule once here, not
+ * once per caller.
  *
  * allowResurrection must be explicitly passed by a dedicated resurrection
  * code path. None exists yet (see Manifest §5, "Heropstanding") — every

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, MessageSquare, Lock, Unlock, Eye, Pencil, Paperclip, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Trash2, Check, Loader2, Link2, ExternalLink, Clock, ChevronDown, ChevronUp, Lock, Unlock, Eye, Pencil, Paperclip, X, ChevronLeft, ChevronRight } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { objectRepository } from "@/repositories";
@@ -139,7 +139,7 @@ function formatForInput(iso) {
   }
 }
 
-export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
+export function ObjectDetail({ object, onSaved, onDelete }) {
   const allTypes = useTypes();
   const [title, setTitle] = useState(object.title);
   const [content, setContent] = useState(object.content);
@@ -505,17 +505,6 @@ export function ObjectDetail({ object, onSaved, onDelete, onResumeChat }) {
           )}
 
           <span className="ml-auto flex items-center gap-3">
-            {/* Resume with Gaia — only for archived chat objects */}
-            {object.type === "chat" && onResumeChat && (
-              <button
-                onClick={() => onResumeChat(object)}
-                className="flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/5 px-2.5 py-1 text-[11px] text-primary hover:bg-primary/15 hover:border-primary/60 transition-all"
-                title="Open dit gesprek opnieuw in Gaia en ga verder waar je gebleven was"
-              >
-                <MessageSquare className="w-3 h-3" />
-                Verder met Gaia
-              </button>
-            )}
             <span className="flex items-center gap-1 text-[11px]" data-testid="save-indicator">
               {saveState === "saving" ? (
                 <><Loader2 className="w-3 h-3 animate-spin" /> Saving…</>

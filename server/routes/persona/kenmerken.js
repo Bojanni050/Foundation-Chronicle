@@ -6,7 +6,6 @@ const { embed } = require("../../embedding");
 const { getOrCreateInstelling, computePromotion } = require("../../personaHelper");
 const { consolidateKenmerken } = require("../../jobs");
 const { assertStatusChangeAllowed } = require("../../statusPromotion");
-const { flagNotableFact } = require("../../gaiaProactiveTopics");
 
 const router = express.Router();
 
@@ -136,18 +135,6 @@ router.post("/kenmerken", async (req, res) => {
 
   // Trigger consolidator in the background to handle instant duplicate merging
   consolidateKenmerken().catch((err) => console.error("[Consolidator] Immediate consolidator failed:", err.message));
-
-  // A brand-new, high-confidence factual claim (not a still-building pattern)
-  // is worth surfacing right away rather than waiting for the user to open
-  // Persona and notice it themselves. Covers both producers of new kenmerken
-  // (live chat consolidation and the full scan both POST here), so this one
-  // check handles both without duplicating it client-side.
-  if (soortValue === "feit" && rows[0].zekerheid >= 85) {
-    const summary = `Ik heb net iets nieuws over je vastgelegd: "${rows[0].kenmerk}". Klopt dat?`;
-    flagNotableFact(rows[0].id, summary).catch((err) =>
-      console.error("[Persona] Could not flag notable fact:", err.message)
-    );
-  }
 
   res.status(201).json({ ...rows[0], reinforced: false });
 });

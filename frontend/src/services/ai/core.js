@@ -1,17 +1,17 @@
 // Core chat plumbing shared by every AI-service module: the actual fetch to
-// the model endpoint (OpenRouter, local model, or a custom endpoint like
-// Gaia's own Hermes gateway), token-stats tracking, and the small JSON-array
-// extraction helper several callers rely on.
+// the model endpoint (OpenRouter, local model, or a custom endpoint),
+// token-stats tracking, and the small JSON-array extraction helper several
+// callers rely on.
 import { getSettings } from "@/lib/settings";
 
 // Returns the full assistant message (content + tool_calls, if any). `chat()`
 // below wraps this for callers that only care about the text.
 //
-// If a specific customEndpoint is passed (e.g. Gaia's own Hermes endpoint, or
-// a specialist's override), that always wins. Otherwise, if the person has
-// opted into "use local model" in Settings, every call transparently routes
-// to their local llama-server sidecar instead of OpenRouter — same call
-// shape, no API key needed, fully optional and off by default.
+// If a specific customEndpoint is passed, that always wins. Otherwise, if
+// the person has opted into "use local model" in Settings, every call
+// transparently routes to their local llama-server sidecar instead of
+// OpenRouter — same call shape, no API key needed, fully optional and off
+// by default.
 export async function chatMessage(messages, extra = {}, model, context = "unknown", customEndpoint = null, customKey = null, extraHeaders = null) {
   const { openrouterKey, models, useLocalModel, localModelUrl } = getSettings();
 

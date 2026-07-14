@@ -8,7 +8,6 @@ import { getSettings } from "@/lib/settings";
 import { pollInbox } from "@/services/inboxSync";
 import { runAutomaticPersonaMaintenance } from "@/services/personaSync";
 import { findRelatedLocal } from "@/services/weave";
-import { checkGaiaProactiveTopics } from "@/services/gaiaProactive";
 import { startUiaCaptureListener } from "@/services/uiaCapture";
 import { invokeTauri } from "@/lib/tauri";
 import { Sidebar } from "@/components/Sidebar";
@@ -18,11 +17,9 @@ import { AIWeave } from "@/components/AIWeave";
 import { WelcomeEmpty } from "@/components/EmptyState";
 import { SearchDialog } from "@/components/dialogs/SearchDialog";
 import { ImportChatDialog } from "@/components/dialogs/ImportChatDialog";
-import { ChatDialog } from "@/components/dialogs/ChatDialog";
 import { SettingsDialog } from "@/components/dialogs/SettingsDialog";
 import { PulseDialog } from "@/components/dialogs/PulseDialog";
 import { PersonaDialog } from "@/components/dialogs/PersonaDialog";
-import { SpecialistDialog } from "@/components/dialogs/SpecialistDialog";
 import { GraphDialog } from "@/components/dialogs/GraphDialog";
 import { AddTypeDialog } from "@/components/dialogs/AddTypeDialog";
 import { EngineDialog } from "@/components/dialogs/EngineDialog";
@@ -39,10 +36,7 @@ export default function App() {
   const [weaveOpen, setWeaveOpen] = useState(false);
   const [pulseBusy, setPulseBusy] = useState(false);
 
-  const [dlg, setDlg] = useState({ search: false, import: false, chat: false, settings: false, pulse: false, persona: false, specialist: false, graph: false, addType: false, engine: false });
-  const [resumeChat, setResumeChat] = useState(null); // object to resume in ChatDialog
-  const [proactiveTopic, setProactiveTopic] = useState(null); // Gaia-initiated conversation, if any
-  const [hasPendingTopic, setHasPendingTopic] = useState(false);
+  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false });
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -92,30 +86,6 @@ export default function App() {
     sync(false);
     return () => clearInterval(id);
   }, [sync]);
-
-  // Gaia-initiated conversations — lower urgency than the 5s inbox poll, and
-  // the consolidator that produces these only runs every 5 minutes anyway.
-  // Auto-opens the chat widget only on the rising edge (no pending topic →
-  // now there is one), same "don't force back open every tick" spirit as the
-  // weave auto-open effect below — not on every single poll while one stays
-  // unresolved (e.g. because the user is mid-conversation elsewhere).
-  const hadPendingTopicRef = useRef(false);
-  useEffect(() => {
-    const poll = async () => {
-      const topics = await checkGaiaProactiveTopics();
-      if (!Array.isArray(topics)) return; // local server unreachable — try again next tick
-      const first = topics[0] || null;
-      setHasPendingTopic(topics.length > 0);
-      setProactiveTopic(first);
-      if (first && !hadPendingTopicRef.current) {
-        setDlg((d) => ({ ...d, chat: true }));
-      }
-      hadPendingTopicRef.current = topics.length > 0;
-    };
-    const id = setInterval(poll, 30000);
-    poll();
-    return () => clearInterval(id);
-  }, []);
 
   // Automatic persona pattern detection + temporal reflection — the
   // background counterpart to PersonaDialog's manual buttons. Both
@@ -243,9 +213,7 @@ export default function App() {
         onSearch={() => setDlg((d) => ({ ...d, search: true }))}
         onPulse={() => setDlg((d) => ({ ...d, pulse: true }))}
         pulseBusy={pulseBusy}
-        onChat={() => setDlg((d) => ({ ...d, chat: true }))}
         onPersona={() => setDlg((d) => ({ ...d, persona: true }))}
-        onSpecialist={() => setDlg((d) => ({ ...d, specialist: true }))}
         onGraph={() => setDlg((d) => ({ ...d, graph: true }))}
         onEngine={() => setDlg((d) => ({ ...d, engine: true }))}
         onLock={() => setAuthenticated(false)}
@@ -268,10 +236,6 @@ export default function App() {
             object={selectedObject}
             onSaved={onSaved}
             onDelete={onDelete}
-            onResumeChat={(obj) => {
-              setResumeChat(obj);
-              setDlg((d) => ({ ...d, chat: true }));
-            }}
           />
         ) : (
           <WelcomeEmpty />
@@ -317,41 +281,7 @@ export default function App() {
       />
       <SettingsDialog open={dlg.settings} onOpenChange={(v) => setDlg((d) => ({ ...d, settings: v }))} />
       <PulseDialog open={dlg.pulse} onOpenChange={(v) => setDlg((d) => ({ ...d, pulse: v }))} onBusyChange={setPulseBusy} />
-      <ChatDialog
-        open={dlg.chat}
-        onOpenChange={(v) => {
-          setDlg((d) => ({ ...d, chat: v }));
-          if (!v) setResumeChat(null);
-        }}
-        resumeObject={resumeChat}
-        proactiveTopic={proactiveTopic}
-      />
-
-      {/* Gaia bubble — always-available, independent trigger for the floating
-          chat widget (in addition to the sidebar's "AI Chat (Gaia)" entry).
-          Hidden while the widget itself is open to avoid overlapping it.
-          Centered on the third column's left border (Sidebar 264px +
-          ObjectList 360px = 624px in), vertically centered on the viewport —
-          straddling the seam between ObjectList and the main detail pane. */}
-      {!dlg.chat && (
-        <button
-          onClick={() => setDlg((d) => ({ ...d, chat: true }))}
-          data-testid="gaia-chat-bubble"
-          title="Chat with Gaia"
-          className="fixed left-[624px] top-1/2 z-40 flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-background shadow-2xl border border-border hover:scale-105 transition-transform overflow-hidden"
-        >
-          <img src="/gaia-avatar.jpg" alt="Gaia" className="h-full w-full object-cover object-top" />
-          {hasPendingTopic && (
-            <span
-              data-testid="gaia-topic-pulse"
-              className="absolute top-1 right-1 h-3 w-3 rounded-full bg-primary animate-pulse ring-2 ring-background"
-              title="Gaia wil iets bespreken"
-            />
-          )}
-        </button>
-      )}
       <PersonaDialog open={dlg.persona} onOpenChange={(v) => setDlg((d) => ({ ...d, persona: v }))} />
-      <SpecialistDialog open={dlg.specialist} onOpenChange={(v) => setDlg((d) => ({ ...d, specialist: v }))} />
       <GraphDialog
         open={dlg.graph}
         onOpenChange={(v) => setDlg((d) => ({ ...d, graph: v }))}

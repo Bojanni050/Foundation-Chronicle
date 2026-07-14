@@ -1,53 +1,6 @@
 const { pool } = require("./db");
 const { embed } = require("./embedding");
 const { getOrCreateInstelling } = require("./personaHelper");
-const { getGaiaHermesConfig } = require("./gaia-backend/gaiaHermesManager");
-const { flagContradiction, hasUnresolvedTopicFor } = require("./gaiaProactiveTopics");
-
-// Two candidate-merge kenmerken can be textually/semantically close (high
-// cosine similarity) while actually disagreeing — e.g. "is geduldig" vs "is
-// ongeduldig". The consolidator used to merge purely on similarity with no
-// check for whether the statements actually agree. This asks Gaia's own
-// Hermes backend (same call pattern as specialistsMcpServer.js's
-// askSpecialist) for a cheap yes/no verdict before merging.
-//
-// Returns true (agree — proceed with the merge, today's original behavior),
-// false (genuine conflict — the caller should flag it instead of merging),
-// or null when no verdict could be obtained (Hermes not configured/
-// reachable, or an unparseable reply) — callers treat null the same as
-// true, so an unavailable Hermes backend never blocks or changes today's
-// existing merge behavior, it only adds the extra check when available.
-async function judgeContradiction(textA, textB) {
-  const { url, key } = getGaiaHermesConfig();
-  if (!key) return null;
-  try {
-    const r = await fetch(`${url}/chat/completions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        temperature: 0,
-        messages: [
-          {
-            role: "system",
-            content:
-              'You judge whether two short statements about the same person agree with each other or contradict each other. Respond with ONLY a JSON object, no other text: {"agree": true} or {"agree": false}.',
-          },
-          { role: "user", content: `Statement A: "${textA}"\nStatement B: "${textB}"` },
-        ],
-      }),
-    });
-    if (!r.ok) return null;
-    const data = await r.json();
-    const content = data.choices?.[0]?.message?.content || "";
-    const match = content.match(/\{[^}]*\}/);
-    if (!match) return null;
-    const parsed = JSON.parse(match[0]);
-    return typeof parsed.agree === "boolean" ? parsed.agree : null;
-  } catch (err) {
-    console.error("[Consolidator] Contradiction judgment failed:", err.message);
-    return null;
-  }
-}
 
 async function runAutoHealEmbeddings() {
   console.log("[Auto-Heal] Running background auto-heal loop for missing embeddings...");
@@ -106,24 +59,6 @@ async function consolidateKenmerken() {
         const statusWeight = { observation: 1, hypothesis: 2, confirmed: 3, rejected: 0 };
         
         for (const match of matches) {
-          const verdict = await judgeContradiction(current.kenmerk, match.kenmerk);
-          if (verdict === false) {
-            // Genuine conflict, not just similar text — leave both records
-            // exactly as they are (no merge, no rejection) and flag it for
-            // the owner instead, unless a topic for this pair is already
-            // pending (avoids re-flagging the same unresolved conflict every
-            // 5-minute run).
-            const alreadyFlagged =
-              (await hasUnresolvedTopicFor(current.id)) || (await hasUnresolvedTopicFor(match.id));
-            if (!alreadyFlagged) {
-              const summary = `Ik zag dat je zowel zei dat je "${current.kenmerk}" bent als "${match.kenmerk}" — dat lijkt met elkaar te botsen. Wat klopt volgens jou?`;
-              await flagContradiction(current.id, match.id, summary).catch((err) =>
-                console.error("[Consolidator] Could not flag contradiction:", err.message)
-              );
-            }
-            continue;
-          }
-
           processedIds.add(match.id);
 
           for (const id of match.bron_object_ids) {

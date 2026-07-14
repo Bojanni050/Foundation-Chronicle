@@ -11,8 +11,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
       object_embedding,
       persona_kenmerk_gebruik,
       persona_kenmerk,
-      persona_pulse_cache,
-      specialist
+      persona_pulse_cache
     CASCADE
   `);
   console.log('Postgres-data verwijderd. persona_instelling (configuratie) blijft ongemoeid.');
