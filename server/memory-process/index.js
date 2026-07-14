@@ -43,7 +43,7 @@ app.use(express.json({ limit: "10mb" }));
 
 app.use("/api/persona", personaRouter);
 app.use("/api/objects", embeddingRouter); // POST /api/objects/:objectId/embed
-app.use("/api/memory", memoryRouter); // hypotheses, evidence, knowledge gaps
+app.use("/api/memory", memoryRouter); // episodes, hypotheses, evidence, knowledge gaps
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 

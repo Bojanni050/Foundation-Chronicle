@@ -1,10 +1,13 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   integer,
   pgEnum,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   vector,
 } from "drizzle-orm/pg-core";
@@ -211,6 +214,16 @@ export const evidenceDirectionEnum = pgEnum("evidence_direction", [
   "contextualizing",
 ]);
 
+// bronsoort describes the semantic object type; sourceType records how the
+// observation entered Chronicle. Keeping those axes separate avoids making
+// custom object types part of a closed ingestion-channel enum.
+export const episodeSourceTypeEnum = pgEnum("episode_source_type", [
+  "chat-import",
+  "document",
+  "explicit-input",
+  "system-observation",
+]);
+
 // A knowledge gap's own small lifecycle, independent of any one hypothesis.
 // unknown = never looked into. not_asked = identified but no source has
 // addressed it yet. known_absent = actively looked, genuinely no answer
@@ -239,37 +252,60 @@ export const hypothesis = pgTable("hypothesis", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const evidence = pgTable("evidence", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  hypothesisId: uuid("hypothesis_id")
-    .notNull()
-    .references(() => hypothesis.id, { onDelete: "cascade" }),
-  richting: evidenceDirectionEnum("richting").notNull(),
-  // What kind of source this is (e.g. "chat", "note", "document") — free
-  // text, not an enum: Chronicle's object types already grow via
-  // AddTypeDialog, a closed enum here would need a migration every time.
-  bronsoort: text("bronsoort").notNull(),
-  fragment: text("fragment").notNull(),
-  // Who said it, if known (e.g. a turn's role, or a named person) — nullable
-  // since not every source has an identifiable speaker (e.g. a document).
-  spreker: text("spreker"),
-  // When the *source content* occurred (e.g. a chat turn's own timestamp),
-  // not when this evidence row was recorded — createdAt below covers that.
-  tijdstip: timestamp("tijdstip", { withTimezone: true }),
-  // Chronicle object id (app-generated string, no FK — same convention as
-  // persona_kenmerk.bron_object_ids: objects live in IndexedDB, not Postgres).
-  bronObjectId: text("bron_object_id").notNull(),
-  // Precise pointer within the source object (e.g. a turn index or URL
-  // fragment) for re-finding the exact spot the fragment came from.
-  bronReferentie: text("bron_referentie"),
-  // The provider-conversation-identity string (e.g. "chatgpt:<uuid>"), when
-  // the source is a chat — this is what epistemicPolicy's independence
-  // check groups on: two evidence rows from the same conversation are one
-  // source, not two, no matter how many separate turns they're pulled from.
-  // Null for non-chat sources, where bronObjectId itself is the source unit.
-  conversationIdentity: text("conversation_identity"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+// An immutable snapshot of exactly what Chronicle observed. Episodes are
+// hypothesis-independent, so one frozen observation can be interpreted for
+// several hypotheses without duplicating source text or provenance.
+export const episode = pgTable(
+  "episode",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Objects live in IndexedDB, so this is intentionally not a SQL FK.
+    bronObjectId: text("bron_object_id").notNull(),
+    bronsoort: text("bronsoort").notNull(),
+    fragment: text("fragment").notNull(),
+    spreker: text("spreker"),
+    // Source/event time. Null means the source exposed no trustworthy time.
+    observedAt: timestamp("observed_at", { withTimezone: true }),
+    bronReferentie: text("bron_referentie"),
+    conversationIdentity: text("conversation_identity"),
+    sourceType: episodeSourceTypeEnum("source_type").notNull(),
+    // Confidence in extraction, on a 0-100 scale; not hypothesis confidence.
+    extractionConfidence: integer("extraction_confidence"),
+    contextWindow: text("context_window"),
+    // Hash over the observation fields above. capturedAt is excluded so an
+    // exact re-observation resolves to the original immutable episode.
+    observationHash: text("observation_hash").notNull(),
+    // System time of first persistence and the episode's sole audit timestamp.
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("episode_observation_hash_unique").on(table.observationHash),
+    check(
+      "episode_extraction_confidence_range",
+      sql`${table.extractionConfidence} IS NULL OR (${table.extractionConfidence} >= 0 AND ${table.extractionConfidence} <= 100)`,
+    ),
+  ],
+);
+
+// The thin interpretative relation: which direction one immutable episode
+// points for one hypothesis. A pair is unique so it cannot be counted twice.
+export const evidence = pgTable(
+  "evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    hypothesisId: uuid("hypothesis_id")
+      .notNull()
+      .references(() => hypothesis.id, { onDelete: "cascade" }),
+    episodeId: uuid("episode_id")
+      .notNull()
+      .references(() => episode.id, { onDelete: "restrict" }),
+    richting: evidenceDirectionEnum("richting").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("evidence_hypothesis_episode_unique").on(table.hypothesisId, table.episodeId),
+  ],
+);
 
 export const knowledgeGap = pgTable("knowledge_gap", {
   id: uuid("id").primaryKey().defaultRandom(),

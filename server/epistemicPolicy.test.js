@@ -21,8 +21,8 @@ function test(name, fn) {
 
 test("independence: two extractions from the same chat count as one source", () => {
   const evidence = [
-    { richting: "supporting", conversationIdentity: "chatgpt:abc", bronObjectId: "obj_1" },
-    { richting: "supporting", conversationIdentity: "chatgpt:abc", bronObjectId: "obj_1" },
+    { richting: "supporting", episode: { conversation_identity: "chatgpt:abc", bron_object_id: "obj_1" } },
+    { richting: "supporting", episode: { conversation_identity: "chatgpt:abc", bron_object_id: "obj_1" } },
   ];
   assert.strictEqual(countIndependentSources(evidence), 1);
 
@@ -34,13 +34,30 @@ test("independence: two extractions from the same chat count as one source", () 
 test("no auto-promotion: meeting verification criteria never changes hypothesis.status", () => {
   const hypothesis = { id: "h1", status: "open" };
   const evidence = [
-    { richting: "supporting", conversationIdentity: "chatgpt:a", bronObjectId: "obj_a" },
-    { richting: "supporting", conversationIdentity: "gemini:b", bronObjectId: "obj_b" },
+    { richting: "supporting", episode: { conversation_identity: "chatgpt:a", bron_object_id: "obj_a" } },
+    { richting: "supporting", episode: { conversation_identity: "gemini:b", bron_object_id: "obj_b" } },
   ];
   const result = isVerified(evidence, { minIndependentSources: 2 });
   assert.strictEqual(result.verified, true, "two independent supporting sources should satisfy the bar");
   // isVerified is read-only — the hypothesis object must be untouched.
   assert.strictEqual(hypothesis.status, "open");
+});
+
+test("episode provenance: missing joined provenance fails loudly", () => {
+  assert.throws(
+    () => countIndependentSources([{ richting: "supporting", episode_id: "ep_1" }]),
+    /joined episode provenance required/,
+  );
+});
+
+test("episode reuse: one frozen episode can be interpreted for multiple hypotheses", () => {
+  const episode = { id: "ep_1", bron_object_id: "obj_document" };
+  const forHypothesisA = { hypothesis_id: "hyp_a", richting: "supporting", episode };
+  const forHypothesisB = { hypothesis_id: "hyp_b", richting: "contradicting", episode };
+
+  assert.strictEqual(countIndependentSources([forHypothesisA]), 1);
+  assert.strictEqual(countIndependentSources([forHypothesisB]), 1);
+  assert.strictEqual(forHypothesisA.episode, forHypothesisB.episode);
 });
 
 test("explicit confirm/reject: only allowed from 'open', reject requires a reason", () => {

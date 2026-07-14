@@ -1,4 +1,5 @@
-// Epistemic memory API — hypotheses, their evidence, and knowledge gaps
+// Epistemic memory API — immutable episodes, hypotheses, their evidence
+// interpretations, and knowledge gaps
 // (see db/schema.ts's "Epistemic memory" section for the data model, and
 // epistemicPolicy.js for every rule enforced here). This module never
 // computes a status transition itself — it only ever calls into
@@ -12,10 +13,67 @@ const {
   rejectHypothesis,
   transitionKnowledgeGap,
 } = require("../epistemicPolicy");
+const { prepareEpisodeInput } = require("../episodePolicy");
 
 const router = express.Router();
 
 const EVIDENCE_DIRECTIONS = ["supporting", "contradicting", "contextualizing"];
+
+async function createOrReuseEpisode(input) {
+  const episode = prepareEpisodeInput(input);
+  const values = [
+    episode.bronObjectId,
+    episode.bronsoort,
+    episode.fragment,
+    episode.spreker,
+    episode.observedAt,
+    episode.bronReferentie,
+    episode.conversationIdentity,
+    episode.sourceType,
+    episode.extractionConfidence,
+    episode.contextWindow,
+    episode.observationHash,
+  ];
+  const { rows } = await pool.query(
+    `INSERT INTO episode
+       (bron_object_id, bronsoort, fragment, spreker, observed_at, bron_referentie,
+        conversation_identity, source_type, extraction_confidence, context_window, observation_hash)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     ON CONFLICT (observation_hash) DO NOTHING
+     RETURNING *`,
+    values,
+  );
+  if (rows[0]) return { episode: rows[0], reused: false };
+
+  // A separate SELECT after ON CONFLICT also handles two concurrent writers:
+  // once the insert statement returns, the winning transaction is visible.
+  const { rows: existing } = await pool.query(
+    "SELECT * FROM episode WHERE observation_hash = $1",
+    [episode.observationHash],
+  );
+  if (!existing[0]) throw new Error("episode conflict resolved without a visible row");
+  return { episode: existing[0], reused: true };
+}
+
+// POST /api/memory/episodes — freeze one raw observation. Exact retries are
+// idempotent and return the already-captured append-only episode.
+router.post("/episodes", async (req, res, next) => {
+  let result;
+  try {
+    result = await createOrReuseEpisode(req.body || {});
+  } catch (err) {
+    if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+    return next(err);
+  }
+  res.status(result.reused ? 200 : 201).json({ ...result.episode, reused: result.reused });
+});
+
+// GET /api/memory/episodes/:id — immutable audit record.
+router.get("/episodes/:id", async (req, res) => {
+  const { rows } = await pool.query("SELECT * FROM episode WHERE id = $1", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: "episode not found" });
+  res.json(rows[0]);
+});
 
 // GET /api/memory/hypotheses?status=open|confirmed|rejected
 router.get("/hypotheses", async (req, res) => {
@@ -48,45 +106,46 @@ router.get("/hypotheses/:id", async (req, res) => {
   if (!hyp) return res.status(404).json({ error: "not found" });
 
   const { rows: evidenceRows } = await pool.query(
-    "SELECT * FROM evidence WHERE hypothesis_id = $1 ORDER BY created_at ASC",
+    `SELECT e.*, to_jsonb(ep) AS episode
+     FROM evidence e
+     JOIN episode ep ON ep.id = e.episode_id
+     WHERE e.hypothesis_id = $1
+     ORDER BY e.created_at ASC`,
     [req.params.id]
   );
   const verdict = isVerified(evidenceRows);
   res.json({ ...hyp, evidence: evidenceRows, verdict });
 });
 
-// POST /api/memory/hypotheses/:id/evidence — attach one piece of evidence.
+// POST /api/memory/hypotheses/:id/evidence — interpret one frozen episode
+// for this hypothesis. Observation/provenance fields are never accepted here.
 // Never touches hypothesis.status: adding evidence, however conclusive,
 // is not the same act as a human confirming or rejecting the hypothesis.
-router.post("/hypotheses/:id/evidence", async (req, res) => {
-  const { richting, bronsoort, fragment, spreker, tijdstip, bronObjectId, bronReferentie, conversationIdentity } =
-    req.body || {};
+router.post("/hypotheses/:id/evidence", async (req, res, next) => {
+  const { richting, episodeId } = req.body || {};
   if (!EVIDENCE_DIRECTIONS.includes(richting)) {
     return res.status(400).json({ error: `richting must be one of: ${EVIDENCE_DIRECTIONS.join(", ")}` });
   }
-  if (!bronsoort || !fragment || !bronObjectId) {
-    return res.status(400).json({ error: "bronsoort, fragment, and bronObjectId required" });
-  }
+  if (!episodeId) return res.status(400).json({ error: "episodeId required" });
   const { rows: hypRows } = await pool.query("SELECT id FROM hypothesis WHERE id = $1", [req.params.id]);
   if (!hypRows[0]) return res.status(404).json({ error: "hypothesis not found" });
+  const { rows: episodeRows } = await pool.query("SELECT id FROM episode WHERE id = $1", [episodeId]);
+  if (!episodeRows[0]) return res.status(404).json({ error: "episode not found" });
 
-  const { rows } = await pool.query(
-    `INSERT INTO evidence
-       (hypothesis_id, richting, bronsoort, fragment, spreker, tijdstip, bron_object_id, bron_referentie, conversation_identity)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-    [
-      req.params.id,
-      richting,
-      bronsoort,
-      fragment,
-      spreker || null,
-      tijdstip || null,
-      bronObjectId,
-      bronReferentie || null,
-      conversationIdentity || null,
-    ]
-  );
-  res.status(201).json(rows[0]);
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO evidence (hypothesis_id, episode_id, richting)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [req.params.id, episodeId, richting],
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err.code === "23505") {
+      return res.status(409).json({ error: "episode already linked to this hypothesis" });
+    }
+    return next(err);
+  }
 });
 
 // PATCH /api/memory/hypotheses/:id/confirm — the one explicit "a human

@@ -12,13 +12,19 @@
 
 const DEFAULT_MIN_INDEPENDENT_SOURCES = 2;
 
-// The unit of "one source" for the independence check: two evidence rows
-// pulled from the same chat (same conversationIdentity, e.g. "chatgpt:<uuid>")
-// count as one source, no matter how many separate turns they're extracted
-// from. Non-chat evidence (conversationIdentity null) falls back to
-// bronObjectId — one object is one source there.
+// Source identity belongs to the immutable episode, not to the evidence link.
+// API queries return that episode nested on each evidence row. Two episodes
+// from one chat still count as one independent source; non-chat episodes fall
+// back to their Chronicle object id.
 function sourceKeyForEvidence(item) {
-  return item.conversationIdentity || item.conversation_identity || `object:${item.bronObjectId ?? item.bron_object_id}`;
+  const source = item.episode || item;
+  const conversationIdentity = source.conversationIdentity || source.conversation_identity;
+  if (conversationIdentity) return conversationIdentity;
+  const bronObjectId = source.bronObjectId ?? source.bron_object_id;
+  if (!bronObjectId) {
+    throw new Error("sourceKeyForEvidence: joined episode provenance required");
+  }
+  return `object:${bronObjectId}`;
 }
 
 // Distinct source count for a list of evidence rows, all assumed to already
