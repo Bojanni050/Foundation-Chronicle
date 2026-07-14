@@ -130,6 +130,54 @@ object remain visible as missing provenance and can be removed explicitly.
 Linked object titles also participate in global search, while the existing
 `links[]` field remains portable through archive backup and restore.
 
+### Epistemic memory: hypotheses, evidence, and facts
+
+Alongside Persona's kenmerken, Chronicle tracks genuinely uncertain claims
+separately. A hypothesis is a testable claim, not a low-confidence fact — it
+carries its own verification/confirmation/rejection criteria, and its status
+only ever changes via an explicit human confirm/reject action (Settings →
+Evidence memory), never automatically by meeting a verification bar. Evidence
+is directional (supporting/contradicting/contextualizing) and always traces
+back to an immutable, append-only episode — the frozen source fragment,
+never edited once captured. Confirming a hypothesis produces a distinct
+fact record (also append-only); a later apparent change never edits that
+fact, it proposes a brand-new hypothesis that, only once a human confirms
+it, supersedes the old one. `GET /api/memory/search` ranks hypotheses and
+facts together on four separately-visible axes (semantic relevance, temporal
+fit, source quality, confidence) rather than one opaque score.
+
+Two background jobs run every 30 minutes alongside Persona's own maintenance:
+one proposes new hypotheses/evidence from recently changed objects, the other
+reviews currently-active facts against new observations and proposes a
+replacement hypothesis only for a genuine change or genuine contradiction —
+never for a merely temporary state, context-dependent variant, exception, or
+likely interpretation error. Neither ever confirms anything on its own.
+
+#### MCP server (search + propose only)
+
+`server/mcpServer.js` exposes this memory layer to an external MCP client
+(e.g. Claude Desktop) over stdio: `search_memory`, `list_hypotheses`,
+`get_hypothesis`, `list_facts`, `create_episode`, `propose_hypothesis`, and
+`add_evidence`. There is deliberately no `confirm`/`reject` tool and no
+knowledge-gap-transition tool — an external model can search Chronicle's
+memory and propose candidates, but confirming or rejecting a hypothesis
+always requires opening Chronicle itself. Requires the Chronicle server
+(`npm run server`, or `npm run dev`) running first.
+
+Run it directly with `npm run mcp` (from `server/`), or point an MCP client
+at it, e.g. in Claude Desktop's `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "chronicle-memory": {
+      "command": "node",
+      "args": ["<absolute path to>/server/mcpServer.js"]
+    }
+  }
+}
+```
+
 ### 🔐 Local Username & PIN Lock Screen
 * Secure your local workspace. On first launch, set up a username and choose a 4-to-6 digit security PIN code.
 * Interactive numpad with tactile hover effects, keyboard bind entries (`0-9` and `Backspace`), shake animation error handlers, and a "Lock Workspace" action in the sidebar.
