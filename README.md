@@ -76,6 +76,13 @@ same stable ID, attachment bytes are checksum-verified, and PostgreSQL changes
 commit in one transaction. Immutable episodes are reused by observation hash
 and are never updated or deleted during restore.
 
+### Safe local data maintenance
+
+Settings → **Data management** reports attachment usage and rebuildable search
+storage before changing anything. Orphan attachment files and derived object
+chunks/embeddings have separate two-step purge controls. These controls never
+delete source objects, knowledge, hypotheses, evidence, or immutable episodes.
+
 ### 🔐 Local Username & PIN Lock Screen
 * Secure your local workspace. On first launch, set up a username and choose a 4-to-6 digit security PIN code.
 * Interactive numpad with tactile hover effects, keyboard bind entries (`0-9` and `Backspace`), shake animation error handlers, and a "Lock Workspace" action in the sidebar.

@@ -51,6 +51,17 @@ export function restoreMemory(memory) {
   });
 }
 
+export function getMemoryStorageInventory() {
+  return memoryRequest("/maintenance/storage");
+}
+
+export function purgeDerivedMemory() {
+  return memoryRequest("/maintenance/purge-derived", {
+    method: "POST",
+    body: JSON.stringify({ confirmation: "PURGE_DERIVED_MEMORY" }),
+  });
+}
+
 export function getHypothesis(id) {
   return memoryRequest(`/hypotheses/${encodeURIComponent(id)}`);
 }

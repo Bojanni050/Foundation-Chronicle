@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { buildMemoryExport } = require("../server/memoryExport");
 const { restoreMemoryWithClient } = require("../server/memoryRestore");
+const { getMemoryStorageInventory } = require("../server/memoryMaintenance");
 
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 
@@ -97,6 +98,11 @@ try {
   const restoreResult = await restoreMemoryWithClient(client, memoryExport);
   assert.ok(restoreResult.episodeReused >= 2, "restore must reuse immutable episodes by hash");
   assert.equal(restoreResult.counts.evidence, memoryExport.tables.evidence.length);
+
+  const storageInventory = await getMemoryStorageInventory(client);
+  assert.ok(storageInventory.episodes >= 2);
+  assert.ok(storageInventory.evidence >= 3);
+  assert.ok(Number(storageInventory.derived_bytes) >= 0);
 
   await client.query("SAVEPOINT duplicate_evidence");
   try {

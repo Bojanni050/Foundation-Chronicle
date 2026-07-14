@@ -16,6 +16,7 @@ const {
 const { prepareEpisodeInput } = require("../episodePolicy");
 const { buildMemoryExport } = require("../memoryExport");
 const { restoreMemory } = require("../memoryRestore");
+const { getMemoryStorageInventory, purgeDerivedMemory } = require("../memoryMaintenance");
 
 const router = express.Router();
 
@@ -41,6 +42,23 @@ router.post("/restore", async (req, res, next) => {
   } catch (err) {
     if (err instanceof TypeError) return res.status(400).json({ error: err.message });
     if (/ conflict: /.test(err.message)) return res.status(409).json({ error: err.message });
+    return next(err);
+  }
+});
+
+router.get("/maintenance/storage", async (_req, res, next) => {
+  try {
+    res.json(await getMemoryStorageInventory(pool));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/maintenance/purge-derived", async (req, res, next) => {
+  try {
+    res.json(await purgeDerivedMemory(pool, req.body?.confirmation));
+  } catch (err) {
+    if (err instanceof TypeError) return res.status(400).json({ error: err.message });
     return next(err);
   }
 });

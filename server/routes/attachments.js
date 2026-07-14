@@ -5,7 +5,14 @@
 // keeping large binaries out of browser storage.
 const express = require("express");
 const { requireAuth } = require("../auth");
-const { saveAttachment, restoreAttachment, getAttachment } = require("../attachmentsStore");
+const {
+  saveAttachment,
+  restoreAttachment,
+  getAttachment,
+  listAttachments,
+  findOrphanAttachmentIds,
+  purgeOrphanAttachments,
+} = require("../attachmentsStore");
 
 const router = express.Router();
 
@@ -73,6 +80,31 @@ router.post("/restore/:id", requireAuth, express.raw({ type: "*/*", limit: "25mb
     if (err.code === "ATTACHMENT_ID_CONFLICT") return res.status(409).json({ error: err.message });
     throw err;
   }
+});
+
+// POST /api/attachments/inventory — the browser supplies the attachment ids
+// referenced by its IndexedDB objects; the server compares those with disk.
+router.post("/inventory", requireAuth, (req, res) => {
+  const referencedIds = Array.isArray(req.body?.referencedIds) ? req.body.referencedIds : [];
+  const attachments = listAttachments();
+  const orphanIds = new Set(findOrphanAttachmentIds(attachments, referencedIds));
+  const orphanBytes = attachments
+    .filter((attachment) => orphanIds.has(attachment.id))
+    .reduce((total, attachment) => total + Number(attachment.size || 0), 0);
+  res.json({
+    totalCount: attachments.length,
+    totalBytes: attachments.reduce((total, attachment) => total + Number(attachment.size || 0), 0),
+    orphanCount: orphanIds.size,
+    orphanBytes,
+  });
+});
+
+router.post("/purge-orphans", requireAuth, (req, res) => {
+  if (req.body?.confirmation !== "PURGE_ORPHAN_ATTACHMENTS") {
+    return res.status(400).json({ error: "explicit orphan purge confirmation required" });
+  }
+  const referencedIds = Array.isArray(req.body?.referencedIds) ? req.body.referencedIds : [];
+  res.json(purgeOrphanAttachments(referencedIds));
 });
 
 // GET /api/attachments/:id/:filename — no auth: this is what <img src> tags

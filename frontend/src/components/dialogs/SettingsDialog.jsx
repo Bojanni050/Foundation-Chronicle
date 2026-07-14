@@ -16,6 +16,19 @@ import {
   mergeChronicleBackup,
   readChronicleBackupFile,
 } from "@/services/backupService";
+import {
+  loadDataInventory,
+  purgeDerivedMemory,
+  purgeOrphanAttachments,
+} from "@/services/maintenanceApi";
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
 
 function Field({ label, children, hint }) {
   return (
@@ -49,6 +62,10 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [backupBusy, setBackupBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [restoreCandidate, setRestoreCandidate] = useState(null);
+  const [maintenance, setMaintenance] = useState(null);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [purgeTarget, setPurgeTarget] = useState(null);
+  const [purgeBusy, setPurgeBusy] = useState(false);
 
   const handleBackup = async () => {
     setBackupBusy(true);
@@ -96,6 +113,38 @@ export function SettingsDialog({ open, onOpenChange }) {
     } catch (err) {
       toast.error(`Restore failed: ${err.message}`);
       setRestoreBusy(false);
+    }
+  };
+
+  const refreshMaintenance = async () => {
+    setMaintenanceLoading(true);
+    try {
+      setMaintenance(await loadDataInventory());
+    } catch (err) {
+      toast.error(`Storage scan failed: ${err.message}`);
+    } finally {
+      setMaintenanceLoading(false);
+    }
+  };
+
+  const handlePurge = async () => {
+    if (!purgeTarget) return;
+    setPurgeBusy(true);
+    try {
+      const result = purgeTarget === "attachments"
+        ? await purgeOrphanAttachments()
+        : await purgeDerivedMemory();
+      if (purgeTarget === "attachments") {
+        toast.success(`Deleted ${result.deleted} orphan attachment files (${formatBytes(result.bytes)})`);
+      } else {
+        toast.success(`Deleted ${result.objectChunks} search chunks and ${result.objectEmbeddings} object embeddings`);
+      }
+      setPurgeTarget(null);
+      await refreshMaintenance();
+    } catch (err) {
+      toast.error(`Purge failed: ${err.message}`);
+    } finally {
+      setPurgeBusy(false);
     }
   };
 
@@ -735,6 +784,102 @@ export function SettingsDialog({ open, onOpenChange }) {
                 </div>
               )}
             </div>
+          </section>
+
+          <div className="border-t border-border" />
+
+          <section className="space-y-4" data-testid="data-management-section">
+            <div>
+              <h3 className="font-serif text-base text-ink">Data management</h3>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Inspect local storage and remove only rebuildable search indexes or attachment files that no current object references.
+                Source objects, knowledge, hypotheses, evidence, and immutable episodes are never purged here.
+              </p>
+            </div>
+            <button
+              onClick={refreshMaintenance}
+              disabled={maintenanceLoading || purgeBusy}
+              data-testid="scan-storage-btn"
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-ink hover:bg-accent disabled:opacity-40 transition-colors"
+            >
+              {maintenanceLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4 text-primary" />}
+              {maintenanceLoading ? "Scanning storage…" : maintenance ? "Refresh storage scan" : "Scan local storage"}
+            </button>
+
+            {maintenance && (
+              <div className="space-y-3" data-testid="storage-inventory">
+                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                  <div className="rounded-md border border-border bg-card/40 p-2">
+                    <p className="text-muted-foreground">Attachments</p>
+                    <p className="mt-1 font-medium text-ink">{maintenance.attachments.totalCount} · {formatBytes(maintenance.attachments.totalBytes)}</p>
+                  </div>
+                  <div className="rounded-md border border-border bg-card/40 p-2">
+                    <p className="text-muted-foreground">Orphan files</p>
+                    <p className="mt-1 font-medium text-ink">{maintenance.attachments.orphanCount} · {formatBytes(maintenance.attachments.orphanBytes)}</p>
+                  </div>
+                  <div className="rounded-md border border-border bg-card/40 p-2">
+                    <p className="text-muted-foreground">Search chunks</p>
+                    <p className="mt-1 font-medium text-ink">{maintenance.memory.object_chunks}</p>
+                  </div>
+                  <div className="rounded-md border border-border bg-card/40 p-2">
+                    <p className="text-muted-foreground">Object embeddings</p>
+                    <p className="mt-1 font-medium text-ink">{maintenance.memory.object_embeddings}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setPurgeTarget("attachments")}
+                    disabled={purgeBusy || maintenance.attachments.orphanCount === 0}
+                    data-testid="purge-orphan-attachments-btn"
+                    className="inline-flex items-center gap-2 rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-40 transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Purge orphan attachments
+                  </button>
+                  <button
+                    onClick={() => setPurgeTarget("derived")}
+                    disabled={purgeBusy || (maintenance.memory.object_chunks === 0 && maintenance.memory.object_embeddings === 0)}
+                    data-testid="purge-derived-memory-btn"
+                    className="inline-flex items-center gap-2 rounded-lg border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-40 transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Purge derived search data
+                  </button>
+                </div>
+
+                {purgeTarget && (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 space-y-2" data-testid="purge-confirmation">
+                    <p className="text-xs font-medium text-ink">
+                      {purgeTarget === "attachments"
+                        ? `Delete ${maintenance.attachments.orphanCount} unreferenced attachment files?`
+                        : `Delete ${maintenance.memory.object_chunks} search chunks and ${maintenance.memory.object_embeddings} embeddings?`}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      This cannot be undone, but it does not delete source objects or immutable memory records.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handlePurge}
+                        disabled={purgeBusy}
+                        data-testid="confirm-purge-btn"
+                        className="inline-flex items-center gap-2 rounded-md bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground disabled:opacity-40"
+                      >
+                        {purgeBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        {purgeBusy ? "Purging…" : "Confirm purge"}
+                      </button>
+                      <button
+                        onClick={() => setPurgeTarget(null)}
+                        disabled={purgeBusy}
+                        className="rounded-md border border-border px-3 py-1.5 text-xs text-ink disabled:opacity-40"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           <div className="border-t border-border" />
