@@ -1,8 +1,8 @@
 import { objectRepository } from "@/repositories";
 import { getSettings, saveSettings } from "@/lib/settings";
-import { getCustomTypes, mergeCustomTypes, setCustomTypes } from "@/lib/typeRegistry";
-import { exportMemory, restoreMemory } from "@/services/memoryApi";
-import { loadDataInventory } from "@/services/maintenanceApi";
+import { BUILTIN_TYPE_KEYS, getCustomTypes, mergeCustomTypes, setCustomTypes } from "@/lib/typeRegistry";
+import { exportMemory, preflightMemoryRestore, restoreMemory } from "@/services/memoryApi";
+import { inspectAttachmentIds, loadDataInventory } from "@/services/maintenanceApi";
 
 export const BACKUP_FORMAT = "foundation-chronicle-backup";
 export const BACKUP_VERSION = 1;
@@ -151,8 +151,41 @@ export async function validateChronicleBackup(backup) {
     throw new Error("Backup is missing archive collections");
   }
   if (backup.memory?.format !== "foundation-chronicle-memory") throw new Error("Backup is missing PostgreSQL memory data");
+  if (backup.memory.version !== 1 || !backup.memory.tables) throw new Error("Backup has unsupported memory data");
+  const requiredMemoryTables = ["hypotheses", "episodes", "evidence", "knowledgeGaps", "knowledge", "knowledgeUsage", "personaSettings", "pulseCache"];
+  if (requiredMemoryTables.some((name) => !Array.isArray(backup.memory.tables[name]))) {
+    throw new Error("Backup is missing required memory tables");
+  }
+  const actualCounts = {
+    objects: backup.objects.length,
+    customTypes: backup.customTypes.length,
+    attachments: backup.attachments.length,
+    episodes: backup.memory.tables.episodes.length,
+    hypotheses: backup.memory.tables.hypotheses.length,
+    evidence: backup.memory.tables.evidence.length,
+  };
+  if (!backup.manifest.counts || Object.entries(actualCounts).some(([name, count]) => backup.manifest.counts[name] !== count)) {
+    throw new Error("Backup manifest counts do not match archive contents");
+  }
   const expected = await sha256(JSON.stringify(withoutArchiveChecksum(backup)));
   if (backup.manifest.contentSha256 !== expected) throw new Error("Backup checksum mismatch");
+  const customTypeKeys = new Set();
+  const reservedTypeKeys = new Set([...BUILTIN_TYPE_KEYS, "all", "untyped"]);
+  for (const type of backup.customTypes) {
+    if (!type || typeof type.key !== "string" || !type.key || reservedTypeKeys.has(type.key) || customTypeKeys.has(type.key)) {
+      throw new Error(`Invalid or duplicate custom type: ${type?.key || "unknown"}`);
+    }
+    customTypeKeys.add(type.key);
+  }
+  const validTypes = new Set([...BUILTIN_TYPE_KEYS, ...customTypeKeys]);
+  const objectIds = new Set();
+  for (const object of backup.objects) {
+    if (!object || typeof object.id !== "string" || !object.id || objectIds.has(object.id)) {
+      throw new Error(`Invalid or duplicate object id: ${object?.id || "unknown"}`);
+    }
+    if (object.type && !validTypes.has(object.type)) throw new Error(`Object ${object.id} has unknown type: ${object.type}`);
+    objectIds.add(object.id);
+  }
   const attachmentIds = new Set();
   for (const attachment of backup.attachments) {
     if (!/^[a-f0-9]{24}$/.test(attachment.id || "") || attachmentIds.has(attachment.id)) {
@@ -183,7 +216,53 @@ export async function readChronicleBackupFile(file) {
     throw new Error("Backup is not valid JSON");
   }
   await validateChronicleBackup(backup);
-  return backup;
+  const preflight = await preflightMemoryRestore(backup.memory);
+  const impact = await buildRestoreImpact(backup, preflight);
+  return { backup, preflight, impact };
+}
+
+export async function buildRestoreImpact(backup, preflight) {
+  const settings = getSettings();
+  const [existingObjects, attachmentInventory] = await Promise.all([
+    objectRepository.list(),
+    inspectAttachmentIds(backup.attachments.map((attachment) => attachment.id)),
+  ]);
+  const existingObjectIds = new Set(existingObjects.map((object) => object.id));
+  const existingTypeKeys = new Set(getCustomTypes().map((type) => type.key));
+  const overwrittenObjectIds = backup.objects
+    .map((object) => object.id)
+    .filter((id) => existingObjectIds.has(id));
+  const overwrittenTypeKeys = backup.customTypes
+    .map((type) => type.key)
+    .filter((key) => existingTypeKeys.has(key));
+  const newAttachmentIds = attachmentInventory.missingReferencedIds || [];
+  return {
+    objects: {
+      added: backup.objects.length - overwrittenObjectIds.length,
+      overwritten: overwrittenObjectIds.length,
+      overwrittenIds: overwrittenObjectIds.slice(0, 10),
+    },
+    customTypes: {
+      added: backup.customTypes.length - overwrittenTypeKeys.length,
+      overwritten: overwrittenTypeKeys.length,
+      overwrittenKeys: overwrittenTypeKeys.slice(0, 10),
+    },
+    attachments: {
+      added: newAttachmentIds.length,
+      reused: backup.attachments.length - newAttachmentIds.length,
+    },
+    workspace: {
+      changes: Boolean(backup.workspace?.name && backup.workspace.name !== settings.workspaceName),
+      currentName: settings.workspaceName,
+      restoredName: backup.workspace?.name || settings.workspaceName,
+    },
+    memory: {
+      episodesAdded: Math.max(0, (preflight.counts.episodes || 0) - preflight.episodeReused),
+      episodesReused: preflight.episodeReused,
+      hypothesesProcessed: preflight.counts.hypotheses || 0,
+      evidenceProcessed: preflight.counts.evidence || 0,
+    },
+  };
 }
 
 async function getLocalApiToken(settings) {
@@ -195,12 +274,25 @@ async function getLocalApiToken(settings) {
   return token;
 }
 
-async function restoreAttachments(attachments, settings) {
-  if (!attachments.length) return;
-  const token = await getLocalApiToken(settings);
+async function attachmentSessionRequest(settings, token, path, body) {
+  const response = await fetch(`${settings.apiUrl.replace(/\/+$/, "")}/api/attachments${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || `Attachment restore session failed (${response.status})`);
+  return result;
+}
+
+async function createAttachmentRestoreSession(settings, token) {
+  return attachmentSessionRequest(settings, token, "/restore-sessions");
+}
+
+async function restoreAttachments(attachments, settings, token, sessionId) {
   for (const attachment of attachments) {
     const response = await fetch(
-      `${settings.apiUrl.replace(/\/+$/, "")}/api/attachments/restore/${encodeURIComponent(attachment.id)}`,
+      `${settings.apiUrl.replace(/\/+$/, "")}/api/attachments/restore-sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachment.id)}`,
       {
         method: "POST",
         headers: {
@@ -225,26 +317,62 @@ export async function mergeChronicleBackup(backup) {
   const previousObjects = await objectRepository.list();
   const previousTypes = getCustomTypes();
   const previousWorkspaceName = settings.workspaceName;
+  let attachmentSessionId = null;
+  let memoryCommitted = false;
 
-  await restoreAttachments(backup.attachments, settings);
   try {
+    if (backup.attachments.length) {
+      const token = await getLocalApiToken(settings);
+      attachmentSessionId = (await createAttachmentRestoreSession(settings, token)).id;
+      await restoreAttachments(backup.attachments, settings, token, attachmentSessionId);
+    }
     mergeCustomTypes(backup.customTypes);
     await objectRepository.mergeAll(backup.objects);
     if (backup.workspace?.name) saveSettings({ workspaceName: backup.workspace.name });
     const memoryResult = await restoreMemory(backup.memory);
+    memoryCommitted = true;
+    let cleanupWarning = null;
+    if (attachmentSessionId) {
+      try {
+        const token = await getLocalApiToken(settings);
+        await attachmentSessionRequest(
+          settings,
+          token,
+          `/restore-sessions/${encodeURIComponent(attachmentSessionId)}/finalize`,
+          { confirmation: "FINALIZE_ATTACHMENT_RESTORE" },
+        );
+      } catch (err) {
+        cleanupWarning = `Restore committed, but attachment session finalization failed: ${err.message}`;
+      }
+    }
     return {
       ...memoryResult,
       objects: backup.objects.length,
       customTypes: backup.customTypes.length,
       attachments: backup.attachments.length,
+      cleanupWarning,
     };
   } catch (err) {
-    // PostgreSQL itself rolls back transactionally. Revert the browser stores
-    // too if the server rejects the merge. Already-verified attachment files
-    // may remain as harmless unreferenced blobs after a later failure.
-    setCustomTypes(previousTypes);
-    await objectRepository.replaceAll(previousObjects);
-    saveSettings({ workspaceName: previousWorkspaceName });
+    if (!memoryCommitted) {
+      if (attachmentSessionId) {
+        try {
+          const token = await getLocalApiToken(settings);
+          await attachmentSessionRequest(
+            settings,
+            token,
+            `/restore-sessions/${encodeURIComponent(attachmentSessionId)}/rollback`,
+            { confirmation: "ROLLBACK_ATTACHMENT_RESTORE" },
+          );
+        } catch (rollbackError) {
+          err.attachmentRollbackError = rollbackError.message;
+        }
+      }
+      // PostgreSQL rolls itself back transactionally. Restore the browser
+      // stores too, leaving only an explicit warning if attachment rollback failed.
+      setCustomTypes(previousTypes);
+      await objectRepository.replaceAll(previousObjects);
+      saveSettings({ workspaceName: previousWorkspaceName });
+    }
     throw err;
   }
 }

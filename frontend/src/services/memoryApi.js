@@ -51,6 +51,13 @@ export function restoreMemory(memory) {
   });
 }
 
+export function preflightMemoryRestore(memory) {
+  return memoryRequest("/restore/preflight", {
+    method: "POST",
+    body: JSON.stringify(memory),
+  });
+}
+
 export function getMemoryStorageInventory() {
   return memoryRequest("/maintenance/storage");
 }

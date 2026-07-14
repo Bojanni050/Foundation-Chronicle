@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { validateMemoryImport, restoreMemory, TABLE_NAMES } = require("./memoryRestore");
+const { validateMemoryImport, restoreMemory, preflightMemoryRestore, TABLE_NAMES } = require("./memoryRestore");
 
 function emptyMemory() {
   return {
@@ -26,7 +26,20 @@ restoreMemory({ connect: async () => client }, emptyMemory()).then((result) => {
   assert.equal(result.counts.episodes, 0);
   assert.deepEqual(queries.slice(0, 4), ["BEGIN", "DELETE FROM object_chunk", "DELETE FROM object_embedding", "COMMIT"]);
   assert.equal(queries.at(-1), "RELEASE");
-  console.log("ok - memory restore validation and transaction boundary");
+  const preflightQueries = [];
+  const preflightClient = {
+    async query(text) {
+      preflightQueries.push(text);
+      return { rows: [], rowCount: 0 };
+    },
+    release() { preflightQueries.push("RELEASE"); },
+  };
+  return preflightMemoryRestore({ connect: async () => preflightClient }, emptyMemory()).then((preflight) => {
+    assert.equal(preflight.compatible, true);
+    assert.equal(preflightQueries.includes("COMMIT"), false);
+    assert.deepEqual(preflightQueries.slice(-2), ["ROLLBACK", "RELEASE"]);
+    console.log("ok - memory restore validation, commit, and rollback-only preflight");
+  });
 }).catch((err) => {
   console.error(err);
   process.exitCode = 1;

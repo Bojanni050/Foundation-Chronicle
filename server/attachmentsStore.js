@@ -117,6 +117,15 @@ function purgeOrphanAttachments(referencedIds) {
   return { deleted: orphanIds.length, bytes, ids: orphanIds };
 }
 
+function deleteAttachment(id) {
+  if (!ID_RE.test(id)) throw new Error(`invalid attachment id: ${id}`);
+  const dir = path.resolve(DATA_DIR, id);
+  if (path.dirname(dir) !== path.resolve(DATA_DIR)) throw new Error(`refusing unsafe attachment path: ${id}`);
+  if (!fs.existsSync(dir)) return false;
+  fs.rmSync(dir, { recursive: true, force: false });
+  return true;
+}
+
 module.exports = {
   saveAttachment,
   restoreAttachment,
@@ -124,4 +133,5 @@ module.exports = {
   listAttachments,
   findOrphanAttachmentIds,
   purgeOrphanAttachments,
+  deleteAttachment,
 };

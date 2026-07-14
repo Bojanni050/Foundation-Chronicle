@@ -22,6 +22,8 @@ import {
   loadDataInventory,
   purgeDerivedMemory,
   purgeOrphanAttachments,
+  inspectInterruptedRestoreSessions,
+  reconcileInterruptedRestoreSessions,
 } from "@/services/maintenanceApi";
 import { rebuildSearchIndex } from "@/services/searchReindex";
 import { repairOrphanDerivedIndexes, runIntegrityAudit } from "@/services/integrityAudit";
@@ -83,6 +85,10 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [recoveryPreview, setRecoveryPreview] = useState(null);
   const [recoveryPreviewBusy, setRecoveryPreviewBusy] = useState("");
   const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [restoreSessions, setRestoreSessions] = useState(null);
+  const [restoreSessionsBusy, setRestoreSessionsBusy] = useState(false);
+  const [restoreSessionsConfirm, setRestoreSessionsConfirm] = useState(false);
+  const [restoreSessionsRepairBusy, setRestoreSessionsRepairBusy] = useState(false);
 
   const handleBackup = async () => {
     setBackupBusy(true);
@@ -123,9 +129,9 @@ export function SettingsDialog({ open, onOpenChange }) {
     setRestoreBusy(true);
     setRestoreCandidate(null);
     try {
-      const backup = await readChronicleBackupFile(file);
-      setRestoreCandidate({ backup, fileName: file.name });
-      toast.success("Backup validated. Review the summary before merging.");
+      const { backup, preflight, impact } = await readChronicleBackupFile(file);
+      setRestoreCandidate({ backup, preflight, impact, fileName: file.name });
+      toast.success("Backup validated against the current database. Review the summary before merging.");
     } catch (err) {
       toast.error(`Backup rejected: ${err.message}`);
     } finally {
@@ -141,10 +147,14 @@ export function SettingsDialog({ open, onOpenChange }) {
       toast.success(
         `Backup merged: ${result.objects} objects, ${result.attachments} attachments, ${result.counts.episodes} episodes`,
       );
+      if (result.cleanupWarning) toast.warning(result.cleanupWarning);
       onOpenChange(false);
       window.location.reload();
     } catch (err) {
-      toast.error(`Restore failed: ${err.message}`);
+      const rollbackWarning = err.attachmentRollbackError
+        ? ` Attachment cleanup also failed: ${err.attachmentRollbackError}`
+        : "";
+      toast.error(`Restore failed: ${err.message}.${rollbackWarning}`);
       setRestoreBusy(false);
     }
   };
@@ -262,6 +272,33 @@ export function SettingsDialog({ open, onOpenChange }) {
       toast.error(`Source recovery failed: ${err.message}`);
     } finally {
       setRecoveryBusy(false);
+    }
+  };
+
+  const handleInspectRestoreSessions = async () => {
+    setRestoreSessionsBusy(true);
+    setRestoreSessionsConfirm(false);
+    try {
+      setRestoreSessions(await inspectInterruptedRestoreSessions());
+    } catch (err) {
+      toast.error(`Restore session inspection failed: ${err.message}`);
+    } finally {
+      setRestoreSessionsBusy(false);
+    }
+  };
+
+  const handleReconcileRestoreSessions = async () => {
+    setRestoreSessionsRepairBusy(true);
+    try {
+      const result = await reconcileInterruptedRestoreSessions();
+      toast.success(`Restore sessions reconciled: ${result.finalized} finalized, ${result.rolledBack} rolled back`);
+      if (result.unresolved) toast.warning(`${result.unresolved} mixed or damaged session${result.unresolved === 1 ? " needs" : "s need"} manual review`);
+      setRestoreSessionsConfirm(false);
+      await handleInspectRestoreSessions();
+    } catch (err) {
+      toast.error(`Restore session reconciliation failed: ${err.message}`);
+    } finally {
+      setRestoreSessionsRepairBusy(false);
     }
   };
 
@@ -921,6 +958,38 @@ export function SettingsDialog({ open, onOpenChange }) {
                   <p className="text-[11px] text-muted-foreground">
                     Created {new Date(restoreCandidate.backup.manifest.createdAt).toLocaleString()} · {restoreCandidate.backup.manifest.counts.objects} objects · {restoreCandidate.backup.manifest.counts.attachments} attachments · {restoreCandidate.backup.manifest.counts.episodes} episodes
                   </p>
+                  <p className="text-[11px] text-primary" data-testid="restore-preflight-compatible">
+                    Database preflight passed · rollback verified · {restoreCandidate.preflight.episodeReused} immutable episodes can be reused
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4" data-testid="restore-impact-report">
+                    <div className="rounded border border-border bg-background p-2">
+                      <p className="text-muted-foreground">Objects</p>
+                      <p className="mt-1 text-ink">+{restoreCandidate.impact.objects.added} new · {restoreCandidate.impact.objects.overwritten} overwritten</p>
+                    </div>
+                    <div className="rounded border border-border bg-background p-2">
+                      <p className="text-muted-foreground">Custom types</p>
+                      <p className="mt-1 text-ink">+{restoreCandidate.impact.customTypes.added} new · {restoreCandidate.impact.customTypes.overwritten} overwritten</p>
+                    </div>
+                    <div className="rounded border border-border bg-background p-2">
+                      <p className="text-muted-foreground">Attachments</p>
+                      <p className="mt-1 text-ink">+{restoreCandidate.impact.attachments.added} upload · {restoreCandidate.impact.attachments.reused} reused</p>
+                    </div>
+                    <div className="rounded border border-border bg-background p-2">
+                      <p className="text-muted-foreground">Episodes</p>
+                      <p className="mt-1 text-ink">+{restoreCandidate.impact.memory.episodesAdded} new · {restoreCandidate.impact.memory.episodesReused} reused</p>
+                    </div>
+                  </div>
+                  {restoreCandidate.impact.workspace.changes && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Workspace name changes from “{restoreCandidate.impact.workspace.currentName}” to “{restoreCandidate.impact.workspace.restoredName}”.
+                    </p>
+                  )}
+                  {restoreCandidate.impact.objects.overwritten > 0 && (
+                    <p className="break-all text-[11px] text-destructive">
+                      Archived versions overwrite matching object IDs: {restoreCandidate.impact.objects.overwrittenIds.join(", ")}
+                      {restoreCandidate.impact.objects.overwritten > restoreCandidate.impact.objects.overwrittenIds.length ? "…" : ""}
+                    </p>
+                  )}
                   <button
                     onClick={handleRestore}
                     disabled={restoreBusy}
@@ -954,6 +1023,84 @@ export function SettingsDialog({ open, onOpenChange }) {
               {maintenanceLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4 text-primary" />}
               {maintenanceLoading ? "Scanning storage…" : maintenance ? "Refresh storage scan" : "Scan local storage"}
             </button>
+
+            <div className="rounded-md border border-border bg-card/40 p-3 space-y-3" data-testid="restore-session-recovery">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-medium text-ink">Interrupted restore sessions</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    Persisted session journals survive a server restart. Fully referenced files can be finalized; fully unreferenced files can be rolled back safely.
+                  </p>
+                </div>
+                <button
+                  onClick={handleInspectRestoreSessions}
+                  disabled={restoreSessionsBusy || restoreSessionsRepairBusy || reindex?.running || purgeBusy}
+                  data-testid="inspect-restore-sessions-btn"
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-ink hover:bg-accent disabled:opacity-40"
+                >
+                  {restoreSessionsBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {restoreSessionsBusy ? "Inspecting journals…" : "Inspect restore journals"}
+                </button>
+              </div>
+
+              {restoreSessions !== null && (
+                <div className="space-y-2" data-testid="restore-session-results">
+                  {restoreSessions.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">No interrupted restore sessions found.</p>
+                  ) : (
+                    <>
+                      {restoreSessions.slice(0, 5).map((session) => (
+                        <div key={session.id} className={`rounded border p-2 text-[11px] ${session.disposition === "mixed" || session.disposition === "attention" ? "border-destructive/30 bg-destructive/5" : "border-border bg-background"}`}>
+                          <p className="font-medium text-ink">Session {session.id}</p>
+                          <p className="mt-1 text-muted-foreground">
+                            {session.createdAttachmentIds.length} new files · {session.referencedCount} referenced · {session.missingFileCount} missing · {session.disposition}
+                          </p>
+                        </div>
+                      ))}
+                      {restoreSessions.some((session) => session.disposition === "mixed" || session.disposition === "attention") && (
+                        <p className="text-[11px] text-destructive">
+                          Mixed or damaged sessions are report-only; Chronicle will not guess whether their files should be kept or deleted.
+                        </p>
+                      )}
+                      {restoreSessions.some((session) => session.disposition === "finalize" || session.disposition === "rollback") && !restoreSessionsConfirm && (
+                        <button
+                          onClick={() => setRestoreSessionsConfirm(true)}
+                          data-testid="reconcile-restore-sessions-btn"
+                          className="rounded-md border border-primary/30 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10"
+                        >
+                          Reconcile safe sessions
+                        </button>
+                      )}
+                      {restoreSessionsConfirm && (
+                        <div className="rounded border border-primary/30 bg-primary/5 p-2 space-y-2">
+                          <p className="text-[11px] text-ink">
+                            Finalize fully referenced sessions and delete only newly created files from fully unreferenced sessions?
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleReconcileRestoreSessions}
+                              disabled={restoreSessionsRepairBusy}
+                              data-testid="confirm-reconcile-restore-sessions-btn"
+                              className="inline-flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-40"
+                            >
+                              {restoreSessionsRepairBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                              {restoreSessionsRepairBusy ? "Reconciling…" : "Confirm reconciliation"}
+                            </button>
+                            <button
+                              onClick={() => setRestoreSessionsConfirm(false)}
+                              disabled={restoreSessionsRepairBusy}
+                              className="rounded border border-border px-3 py-1.5 text-xs text-ink disabled:opacity-40"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
 
             <div className="rounded-md border border-border bg-card/40 p-3 space-y-3" data-testid="integrity-audit-panel">
               <div className="flex flex-wrap items-center justify-between gap-2">

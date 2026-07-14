@@ -76,6 +76,23 @@ same stable ID, attachment bytes are checksum-verified, and PostgreSQL changes
 commit in one transaction. Immutable episodes are reused by observation hash
 and are never updated or deleted during restore.
 
+Before a restore preview becomes actionable, Chronicle now executes the exact
+PostgreSQL restore path inside a rollback-only transaction. This preflight
+catches schema, enum, foreign-key, and identity conflicts before any attachment
+upload or IndexedDB merge begins.
+The confirmation preview also reports the exact merge impact: added versus
+overwritten objects and custom types, new versus reused attachments, workspace
+renames, and new versus hash-reused immutable episodes.
+
+Attachment uploads are scoped to a restore session. A failed merge rolls back
+only files newly created by that session; attachments that already existed are
+never deleted. Session finalization happens only after PostgreSQL commits, and
+a finalization warning never reverses an otherwise successful restore.
+Restore-session journals are persisted locally so a server restart does not
+erase rollback knowledge. Data management can inspect interrupted sessions:
+fully referenced sessions are safe to finalize, fully unreferenced sessions
+are safe to roll back, and mixed or damaged sessions remain report-only.
+
 ### Safe local data maintenance
 
 Settings → **Data management** reports attachment usage and rebuildable search

@@ -13,10 +13,88 @@ const {
   findOrphanAttachmentIds,
   purgeOrphanAttachments,
 } = require("../attachmentsStore");
+const { attachmentRestoreSessions } = require("../attachmentRestoreSessions");
 
 const router = express.Router();
 
 const MAX_SIZE = 25 * 1024 * 1024; // generous for chat images/screenshots
+
+router.post("/restore-sessions", requireAuth, (_req, res) => {
+  res.status(201).json(attachmentRestoreSessions.create());
+});
+
+router.post("/restore-sessions/inventory", requireAuth, (_req, res) => {
+  const sessions = attachmentRestoreSessions.list().map((session) => ({
+    ...session,
+    existingAttachmentIds: session.createdAttachmentIds.filter((id) => Boolean(getAttachment(id))),
+  }));
+  res.json({ sessions });
+});
+
+router.post(
+  "/restore-sessions/:sessionId/attachments/:id",
+  requireAuth,
+  express.raw({ type: "*/*", limit: "25mb" }),
+  (req, res) => {
+    try {
+      attachmentRestoreSessions.require(req.params.sessionId);
+      if (!Buffer.isBuffer(req.body) || !req.body.length) {
+        return res.status(400).json({ error: "empty body" });
+      }
+      const rawFilename = req.get("X-Attachment-Filename") || "file";
+      let filename;
+      try {
+        filename = decodeURIComponent(rawFilename);
+      } catch {
+        filename = rawFilename;
+      }
+      const meta = restoreAttachment(
+        req.body,
+        req.params.id,
+        filename,
+        req.get("X-Attachment-Mime-Type") || "application/octet-stream",
+      );
+      attachmentRestoreSessions.record(req.params.sessionId, meta.id, !meta.reused);
+      return res.status(meta.reused ? 200 : 201).json({
+        id: meta.id,
+        filename: meta.filename,
+        mimeType: meta.mimeType,
+        size: meta.size,
+        reused: meta.reused,
+        url: `/api/attachments/${meta.id}/${encodeURIComponent(meta.filename)}`,
+      });
+    } catch (err) {
+      if (err.code === "RESTORE_SESSION_NOT_FOUND") return res.status(404).json({ error: err.message });
+      if (err.code === "INVALID_ATTACHMENT_ID") return res.status(400).json({ error: err.message });
+      if (err.code === "ATTACHMENT_ID_CONFLICT") return res.status(409).json({ error: err.message });
+      throw err;
+    }
+  },
+);
+
+router.post("/restore-sessions/:sessionId/finalize", requireAuth, (req, res) => {
+  if (req.body?.confirmation !== "FINALIZE_ATTACHMENT_RESTORE") {
+    return res.status(400).json({ error: "explicit restore finalization required" });
+  }
+  try {
+    return res.json(attachmentRestoreSessions.finalize(req.params.sessionId));
+  } catch (err) {
+    if (err.code === "RESTORE_SESSION_NOT_FOUND") return res.status(404).json({ error: err.message });
+    throw err;
+  }
+});
+
+router.post("/restore-sessions/:sessionId/rollback", requireAuth, (req, res) => {
+  if (req.body?.confirmation !== "ROLLBACK_ATTACHMENT_RESTORE") {
+    return res.status(400).json({ error: "explicit restore rollback required" });
+  }
+  try {
+    return res.json(attachmentRestoreSessions.rollback(req.params.sessionId));
+  } catch (err) {
+    if (err.code === "RESTORE_SESSION_NOT_FOUND") return res.status(404).json({ error: err.message });
+    throw err;
+  }
+});
 
 // POST /api/attachments — raw binary body. Filename via X-Attachment-Filename
 // (URL-encoded), mime type via Content-Type. Requires the same bearer token

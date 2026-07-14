@@ -214,4 +214,33 @@ async function restoreMemory(pool, input) {
   }
 }
 
-module.exports = { TABLE_NAMES, validateMemoryImport, restoreMemoryWithClient, restoreMemory };
+// Executes the exact restore path against the current schema and data, then
+// always rolls it back. This catches enum/FK/id conflicts before the frontend
+// uploads attachments or changes IndexedDB.
+async function preflightMemoryRestore(pool, input) {
+  validateMemoryImport(input);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await restoreMemoryWithClient(client, input);
+    await client.query("ROLLBACK");
+    return { compatible: true, mode: result.mode, counts: result.counts, episodeReused: result.episodeReused };
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Preserve the original compatibility error.
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = {
+  TABLE_NAMES,
+  validateMemoryImport,
+  restoreMemoryWithClient,
+  restoreMemory,
+  preflightMemoryRestore,
+};

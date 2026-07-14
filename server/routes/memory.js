@@ -15,7 +15,7 @@ const {
 } = require("../epistemicPolicy");
 const { prepareEpisodeInput } = require("../episodePolicy");
 const { buildMemoryExport } = require("../memoryExport");
-const { restoreMemory } = require("../memoryRestore");
+const { restoreMemory, preflightMemoryRestore } = require("../memoryRestore");
 const {
   getMemoryStorageInventory,
   getObjectIndexInventory,
@@ -44,6 +44,16 @@ router.get("/export", async (_req, res, next) => {
 router.post("/restore", async (req, res, next) => {
   try {
     res.json(await restoreMemory(pool, req.body));
+  } catch (err) {
+    if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+    if (/ conflict: /.test(err.message)) return res.status(409).json({ error: err.message });
+    return next(err);
+  }
+});
+
+router.post("/restore/preflight", async (req, res, next) => {
+  try {
+    res.json(await preflightMemoryRestore(pool, req.body));
   } catch (err) {
     if (err instanceof TypeError) return res.status(400).json({ error: err.message });
     if (/ conflict: /.test(err.message)) return res.status(409).json({ error: err.message });
