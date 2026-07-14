@@ -27,6 +27,7 @@ const personaRouter = require("../routes/persona");
 // proxyToMemory in server/index.js), the same pattern already used for
 // persona requests.
 const embeddingRouter = require("../routes/embedding");
+const memoryRouter = require("../routes/memory");
 const { pushCaptureEvent, getRecentCaptureEvents } = require("../captureActivityLog");
 
 // Localhost-only, never exposed to the browser directly — Chronicle's
@@ -42,6 +43,7 @@ app.use(express.json({ limit: "10mb" }));
 
 app.use("/api/persona", personaRouter);
 app.use("/api/objects", embeddingRouter); // POST /api/objects/:objectId/embed
+app.use("/api/memory", memoryRouter); // hypotheses, evidence, knowledge gaps
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 

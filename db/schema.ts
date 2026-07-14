@@ -180,3 +180,105 @@ export const objectEmbedding = pgTable("object_embedding", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// --------------------------------------------------------------------------
+// Epistemic memory — a general hypothesis/evidence/knowledge-gap layer,
+// distinct from persona_kenmerk. persona_kenmerk answers "what pattern does
+// this evidence support, about the owner specifically, weighed by a single
+// bronnen-count"; hypothesis/evidence answers a broader question that isn't
+// owner-specific and isn't reducible to a source count: "what does this
+// specific piece of evidence say, in which direction, and where exactly did
+// it come from" — provenance and directionality are first-class here, not
+// flattened into a bron_object_ids array.
+//
+// Same non-negotiable as persona_kenmerk (Manifest §5): nothing here ever
+// auto-promotes. Meeting verification criteria only ever changes what
+// isVerified() in epistemicPolicy.js reports — never the stored status.
+// Only an explicit confirm/reject call (a human decision) writes status.
+// --------------------------------------------------------------------------
+
+export const hypothesisStatusEnum = pgEnum("hypothesis_status", [
+  "open",
+  "confirmed",
+  "rejected",
+]);
+
+// supporting = argues for the hypothesis. contradicting = argues against it.
+// contextualizing = neither — background that shapes interpretation without
+// itself arguing a side (e.g. "asked in jest", "quoting someone else").
+export const evidenceDirectionEnum = pgEnum("evidence_direction", [
+  "supporting",
+  "contradicting",
+  "contextualizing",
+]);
+
+// A knowledge gap's own small lifecycle, independent of any one hypothesis.
+// unknown = never looked into. not_asked = identified but no source has
+// addressed it yet. known_absent = actively looked, genuinely no answer
+// exists in the sources checked (a real finding, not silence). resolved =
+// answered, normally via a linked hypothesis reaching "confirmed".
+export const knowledgeGapStatusEnum = pgEnum("knowledge_gap_status", [
+  "unknown",
+  "not_asked",
+  "known_absent",
+  "resolved",
+]);
+
+export const hypothesis = pgTable("hypothesis", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  hypothese: text("hypothese").notNull(),
+  // What would count as verified/confirmed/rejected — written once at
+  // creation so a later confirm/reject is judged against a fixed bar the
+  // hypothesis itself declared, not a bar invented after the fact.
+  verificatieCriteria: text("verificatie_criteria"),
+  bevestigingsCriteria: text("bevestigings_criteria"),
+  afwijzingsCriteria: text("afwijzings_criteria"),
+  status: hypothesisStatusEnum("status").notNull().default("open"),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+  verwerpReden: text("verwerp_reden"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const evidence = pgTable("evidence", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  hypothesisId: uuid("hypothesis_id")
+    .notNull()
+    .references(() => hypothesis.id, { onDelete: "cascade" }),
+  richting: evidenceDirectionEnum("richting").notNull(),
+  // What kind of source this is (e.g. "chat", "note", "document") — free
+  // text, not an enum: Chronicle's object types already grow via
+  // AddTypeDialog, a closed enum here would need a migration every time.
+  bronsoort: text("bronsoort").notNull(),
+  fragment: text("fragment").notNull(),
+  // Who said it, if known (e.g. a turn's role, or a named person) — nullable
+  // since not every source has an identifiable speaker (e.g. a document).
+  spreker: text("spreker"),
+  // When the *source content* occurred (e.g. a chat turn's own timestamp),
+  // not when this evidence row was recorded — createdAt below covers that.
+  tijdstip: timestamp("tijdstip", { withTimezone: true }),
+  // Chronicle object id (app-generated string, no FK — same convention as
+  // persona_kenmerk.bron_object_ids: objects live in IndexedDB, not Postgres).
+  bronObjectId: text("bron_object_id").notNull(),
+  // Precise pointer within the source object (e.g. a turn index or URL
+  // fragment) for re-finding the exact spot the fragment came from.
+  bronReferentie: text("bron_referentie"),
+  // The provider-conversation-identity string (e.g. "chatgpt:<uuid>"), when
+  // the source is a chat — this is what epistemicPolicy's independence
+  // check groups on: two evidence rows from the same conversation are one
+  // source, not two, no matter how many separate turns they're pulled from.
+  // Null for non-chat sources, where bronObjectId itself is the source unit.
+  conversationIdentity: text("conversation_identity"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const knowledgeGap = pgTable("knowledge_gap", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  onderwerp: text("onderwerp").notNull(),
+  status: knowledgeGapStatusEnum("status").notNull().default("unknown"),
+  // The hypothesis expected to resolve this gap, if one exists yet — optional,
+  // a gap can be identified before any hypothesis addressing it has been formed.
+  hypothesisId: uuid("hypothesis_id").references(() => hypothesis.id, { onDelete: "set null" }),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+

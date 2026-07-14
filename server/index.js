@@ -121,6 +121,7 @@ app.use(express.json({ limit: "10mb" }));
 // embedding-model, seed) don't overlap with them and fall through untouched.
 app.use("/api/settings/capture-activity", proxyToMemory);
 app.use("/api/persona", proxyToMemory);
+app.use("/api/memory", proxyToMemory);
 app.post("/api/objects/:objectId/embed", proxyToMemory);
 
 app.use("/api/settings", settingsRouter);
