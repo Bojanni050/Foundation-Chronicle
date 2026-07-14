@@ -1,4 +1,5 @@
 const express = require("express");
+const { pool } = require("../db");
 const { TOKEN } = require("../auth");
 const { getModel: getEmbeddingModel, setModel: setEmbeddingModel, MODEL_OPTIONS } = require("../embedding");
 const { reembedAllRows } = require("../reembed");
@@ -8,6 +9,29 @@ const router = express.Router();
 // GET /api/settings/token
 router.get("/token", (_req, res) => {
   res.json({ token: TOKEN });
+});
+
+// GET /api/settings/status
+router.get("/status", async (_req, res) => {
+  const status = {
+    db: "offline",
+    embeddings: "offline",
+  };
+
+  try {
+    const { rows } = await pool.query("SELECT 1 AS ok");
+    if (rows[0].ok === 1) status.db = "ok";
+  } catch (err) {
+    status.dbError = err.message;
+  }
+
+  const currentModel = getEmbeddingModel();
+  if (currentModel) {
+    status.embeddings = "ok";
+    status.embeddingsModel = currentModel;
+  }
+
+  res.json(status);
 });
 
 // GET /api/settings/embedding-model

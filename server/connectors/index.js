@@ -9,6 +9,7 @@
 
 const path = require("path");
 const fs = require("fs");
+const { pushToInbox } = require("../inboxStore");
 
 const STORE_PATH = path.join(__dirname, "..", "data", "connectors.json");
 
@@ -125,6 +126,31 @@ async function syncConnector(id) {
   if (!typeImpl || !typeImpl.sync) throw new Error(`Type "${entry.type}" does not support syncing`);
 
   const result = await typeImpl.sync(entry.config);
+
+  // Push each synced item straight into the same inbox every other capture
+  // source uses (extension, bulk import, native activity capture) — the
+  // existing pollInbox() distribution step turns it into a Chronicle object
+  // with no special-cased frontend handling needed. Previously the frontend
+  // just discarded result.posts after showing a count — nothing was ever
+  // actually persisted.
+  if (result.ok && Array.isArray(result.posts)) {
+    for (const post of result.posts) {
+      pushToInbox({
+        type: "note",
+        title: post.title || "Untitled",
+        content: post.content || post.excerpt || "",
+        sourceProvider: entry.type,
+        url: post.url || null,
+        // WP's tags/categories here are numeric taxonomy ids, not resolved
+        // labels — not useful as Chronicle tags without an extra lookup, so
+        // left empty for now rather than showing raw numbers.
+        tags: [],
+        occurredAt: post.date || null,
+        source: "connector",
+        queuedAt: new Date().toISOString(),
+      });
+    }
+  }
 
   // Update lastSyncAt and status
   const store = readStore();

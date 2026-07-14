@@ -19,8 +19,8 @@ let activeRunId = null;
 // idle time between runs makes this a no-op.
 const RESTART_GRACE_MS = 800;
 
-// Same ring-buffer pattern as gaia-backend/gaiaHermesManager.js — the
-// frontend polls this instead of needing a persistent connection.
+// Ring-buffer of recent log lines — the frontend polls this instead of
+// needing a persistent connection.
 const MAX_LOG_LINES = 500;
 let recentLogLines = [];
 
@@ -60,9 +60,13 @@ function preflightCheck() {
   return null;
 }
 
-async function startBulkImport({ limit, headless, provider = "chatgpt" } = {}) {
+async function startBulkImport({ limit, headless, provider = "chatgpt", exportPath } = {}) {
   if (status !== "idle" && status !== "exited") {
     return { started: false, reason: "already_running" };
+  }
+
+  if (provider === "claude" && !exportPath) {
+    return { started: false, reason: "exportPath required for provider=claude" };
   }
 
   const preflightError = preflightCheck();
@@ -98,6 +102,7 @@ async function startBulkImport({ limit, headless, provider = "chatgpt" } = {}) {
     ];
     if (limit) args.push("--limit", String(limit));
     if (headless) args.push("--headless");
+    if (provider === "claude" && exportPath) args.push("--export-path", exportPath);
 
     pushLogLine("stdout", `Starting bulk import (provider=${provider}, limit=${limit || "all"}, headless=${!!headless})...`);
     

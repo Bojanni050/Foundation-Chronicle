@@ -10,7 +10,8 @@
     "install:all": "cd frontend && yarn install && cd ../server && npm install",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "check:sync": "node scripts/check-shared-logic-sync.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",

@@ -4,6 +4,20 @@ import { embedObject } from "@/services/objectEmbedding";
 import { contentHash } from "@/lib/contentHash";
 import { deriveProviderConversationId } from "@/lib/providerConversationId";
 
+// Event-hook after distribution — the memory-engine's plug-in point into
+// what capture just produced. pollInbox() below stays the sole /claim
+// caller (no race), and calls this right after it creates or updates an
+// object from a claimed item. Fire-and-forget, visibility/debug only: never
+// awaited, never blocks the import if the local server or memory-process
+// isn't reachable.
+function notifyCaptureActivity(apiUrl, obj) {
+  fetch(`${apiUrl}/api/settings/capture-activity`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: obj.title, sourceProvider: obj.sourceProvider, type: obj.type }),
+  }).catch(() => {});
+}
+
 /**
  * Pull queued objects from the local API inbox into IndexedDB. Returns the
  * number of objects imported. Fails silently if the local server isn't
@@ -62,6 +76,7 @@ export async function pollInbox() {
             if (updated) {
               created++;
               embedObject(updated.id, it.turns, updated.content).catch(() => {});
+              notifyCaptureActivity(apiUrl, updated);
             }
           } catch (err) {
             // A locked object rejects changes to protected fields by
@@ -109,6 +124,7 @@ export async function pollInbox() {
       // Best-effort — doesn't block the import if the local server or the
       // embedding model isn't available.
       embedObject(obj.id, it.turns, obj.content).catch(() => {});
+      notifyCaptureActivity(apiUrl, obj);
     } catch (err) {
       console.error("[pollInbox] failed to create object from inbox item, item lost:", it, err);
     }

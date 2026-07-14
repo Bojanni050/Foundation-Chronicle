@@ -3,6 +3,9 @@
 A calm, minimal, **local-first** personal knowledge app inspired by Capacities. 
 Single-user, private, offline-first. Your notes, chats, tasks, and memory reflections remain strictly on your own device.
 
+> **Kernprincipe: registreren en archiveren.** Lees [`docs/kernprincipe.md`](docs/kernprincipe.md)
+> vóór je hier iets aan toevoegt.
+
 ---
 
 ## 🏗️ Architecture & Technology Stack

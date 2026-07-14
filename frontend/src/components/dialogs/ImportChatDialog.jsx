@@ -31,6 +31,7 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
   // actual Python/Playwright subprocess (see server/chatgptImportManager.js).
   const [bulkLimit, setBulkLimit] = useState("");
   const [bulkProvider, setBulkProvider] = useState("chatgpt");
+  const [bulkExportPath, setBulkExportPath] = useState("");
   const [bulkStatus, setBulkStatus] = useState({ running: false, lines: [] });
   const [bulkError, setBulkError] = useState("");
   const bulkLogRef = useRef(null);
@@ -58,12 +59,20 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
 
   const startBulkImport = async () => {
     setBulkError("");
+    if (bulkProvider === "claude" && !bulkExportPath.trim()) {
+      setBulkError("Point at your Anthropic export .zip or extracted folder first.");
+      return;
+    }
     try {
       const { apiUrl } = getSettings();
       const res = await fetch(`${apiUrl}/api/settings/chatgpt-import/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: bulkLimit ? Number(bulkLimit) : undefined, provider: bulkProvider }),
+        body: JSON.stringify({
+          limit: bulkLimit ? Number(bulkLimit) : undefined,
+          provider: bulkProvider,
+          exportPath: bulkProvider === "claude" ? bulkExportPath.trim() : undefined,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -254,8 +263,8 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
           <TabsContent value="bulk" className="mt-4 space-y-3">
             <p className="text-xs text-muted-foreground/80 leading-relaxed">
               Drives a real logged-in browser through your whole chat history and imports every
-              conversation. First run opens a visible Chrome window to log in — after that it's cached and
-              can run in the background. See <code>tools/chatgpt_bulk_import/README.md</code>.
+              conversation (ChatGPT/Gemini), or reads Anthropic's official data export directly
+              (Claude — no browser, no login). See <code>tools/chatgpt_bulk_import/README.md</code>.
             </p>
             <div className="flex items-center gap-2">
               <select
@@ -266,6 +275,7 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
               >
                 <option value="chatgpt">ChatGPT</option>
                 <option value="gemini">Google Gemini</option>
+                <option value="claude">Claude (data export)</option>
               </select>
               <input
                 type="number"
@@ -297,6 +307,23 @@ export function ImportChatDialog({ open, onOpenChange, onImported }) {
                 </button>
               )}
             </div>
+            {bulkProvider === "claude" && (
+              <div className="space-y-1">
+                <input
+                  type="text"
+                  value={bulkExportPath}
+                  onChange={(e) => setBulkExportPath(e.target.value)}
+                  disabled={bulkStatus.running}
+                  placeholder="C:\Users\bojan\Downloads\data-....zip (or the extracted folder)"
+                  data-testid="bulk-export-path-input"
+                  className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-40"
+                />
+                <p className="text-[11px] text-muted-foreground/70">
+                  From claude.ai: Settings → Privacy → Export data. Paste the path to the downloaded
+                  .zip or the folder you extracted it to.
+                </p>
+              </div>
+            )}
             {bulkError && <p className="text-xs text-destructive" data-testid="bulk-error">{bulkError}</p>}
             <div
               ref={bulkLogRef}

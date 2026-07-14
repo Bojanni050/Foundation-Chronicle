@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AIService } from "@/services/AIService";
+import { fetchSystemStatus } from "@/services/statusService";
 
 function InfoCard({ icon: Icon, title, description, badge, onClick, active }) {
   return (
@@ -49,15 +50,19 @@ function InfoCard({ icon: Icon, title, description, badge, onClick, active }) {
 }
 
 export function EngineDialog({ open, onOpenChange }) {
-  const [tab, setTab] = useState("architecture"); // architecture | memory | telemetry | philosophy
+  const [tab, setTab] = useState("architecture"); // architecture | memory | telemetry | philosophy | status
   const [selectedNode, setSelectedNode] = useState(null);
   const [stats, setStats] = useState({ totalPromptTokens: 0, totalCompletionTokens: 0, totalCost: 0, calls: [] });
+  const [sysStatus, setSysStatus] = useState(null);
 
   useEffect(() => {
     if (open) {
       setStats(AIService.getTokenStats());
+      if (tab === "status") {
+        fetchSystemStatus().then(setSysStatus);
+      }
     }
-  }, [open]);
+  }, [open, tab]);
 
   const handleClearStats = () => {
     if (window.confirm("Are you sure you want to reset all token stats?")) {
@@ -139,6 +144,14 @@ export function EngineDialog({ open, onOpenChange }) {
               }`}
             >
               Telemetry
+            </button>
+            <button
+              onClick={() => { setTab("status"); setSelectedNode(null); }}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                tab === "status" ? "bg-background text-ink shadow-sm" : "text-muted-foreground hover:text-ink"
+              }`}
+            >
+              System Status
             </button>
             <button
               onClick={() => { setTab("philosophy"); setSelectedNode(null); }}
@@ -236,6 +249,91 @@ export function EngineDialog({ open, onOpenChange }) {
                   <p className="mt-2 text-xs leading-relaxed text-muted-foreground/90 bg-background/50 p-2.5 rounded-lg border border-border/40 font-mono">
                     {nodes[selectedNode].detail}
                   </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === "status" && (
+            <div className="space-y-6 animate-in fade-in duration-300">
+              <div className="rounded-xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-5 border border-primary/20">
+                <div className="flex items-start gap-4">
+                  <div className="rounded-xl bg-primary/20 p-2.5 text-primary">
+                    <CheckCircle className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="font-serif text-base font-semibold text-ink">System Health</h3>
+                    <p className="text-xs text-muted-foreground/90 max-w-2xl leading-relaxed">
+                      Real-time status of local services, databases, and AI endpoints.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => fetchSystemStatus().then(setSysStatus)}
+                    className="ml-auto rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent transition-colors"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </div>
+
+              {!sysStatus ? (
+                <div className="text-sm text-muted-foreground text-center py-8">Checking status...</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Backend */}
+                  <div className={`p-4 rounded-xl border ${sysStatus.backend === 'ok' ? 'border-primary/40 bg-primary/5' : 'border-destructive/40 bg-destructive/5'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`h-3 w-3 rounded-full ${sysStatus.backend === 'ok' ? 'bg-primary' : 'bg-destructive'}`} />
+                      <div className="font-semibold text-sm">Local Node.js Server</div>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {sysStatus.backend === 'ok' ? "Running on port 4577" : "Offline or unreachable. Start the server using 'npm run server'."}
+                    </div>
+                  </div>
+
+                  {/* Database */}
+                  <div className={`p-4 rounded-xl border ${sysStatus.db === 'ok' ? 'border-primary/40 bg-primary/5' : 'border-destructive/40 bg-destructive/5'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`h-3 w-3 rounded-full ${sysStatus.db === 'ok' ? 'bg-primary' : 'bg-destructive'}`} />
+                      <div className="font-semibold text-sm">PostgreSQL Database</div>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {sysStatus.db === 'ok' ? "Connected and responding to queries." : "Offline or inaccessible."}
+                    </div>
+                  </div>
+
+                  {/* Embeddings */}
+                  <div className={`p-4 rounded-xl border ${sysStatus.embeddings === 'ok' ? 'border-primary/40 bg-primary/5' : 'border-destructive/40 bg-destructive/5'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`h-3 w-3 rounded-full ${sysStatus.embeddings === 'ok' ? 'bg-primary' : 'bg-destructive'}`} />
+                      <div className="font-semibold text-sm">ONNX Embeddings Engine</div>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {sysStatus.embeddings === 'ok' ? "Model loaded in memory." : "Not loaded. Waiting for first query or Auto-Heal."}
+                    </div>
+                  </div>
+
+                  {/* LLM */}
+                  <div className={`p-4 rounded-xl border ${sysStatus.llm === 'ok' ? 'border-primary/40 bg-primary/5' : sysStatus.llm === 'missing_key' ? 'border-orange-500/40 bg-orange-500/5' : 'border-destructive/40 bg-destructive/5'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`h-3 w-3 rounded-full ${sysStatus.llm === 'ok' ? 'bg-primary' : sysStatus.llm === 'missing_key' ? 'bg-orange-500' : 'bg-destructive'}`} />
+                      <div className="font-semibold text-sm">LLM Engine</div>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {sysStatus.llmMessage}
+                    </div>
+                  </div>
+
+                  {/* Tauri Capture */}
+                  <div className={`p-4 rounded-xl border ${sysStatus.tauri === 'ok' ? 'border-primary/40 bg-primary/5' : sysStatus.tauri === 'disabled' ? 'border-border bg-accent/20' : 'border-orange-500/40 bg-orange-500/5'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`h-3 w-3 rounded-full ${sysStatus.tauri === 'ok' ? 'bg-primary' : sysStatus.tauri === 'disabled' ? 'bg-muted-foreground' : 'bg-orange-500'}`} />
+                      <div className="font-semibold text-sm">Ambient Capture (Tauri)</div>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {sysStatus.tauriMessage}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

@@ -13,21 +13,82 @@ process.on("unhandledRejection", (reason) => {
 
 const express = require("express");
 const cors = require("cors");
+const { spawn } = require("child_process");
+const path = require("path");
+const { Readable } = require("stream");
 const { TOKEN, requireAuth } = require("./auth");
-const { startBackgroundJobs } = require("./jobs");
 const { readInbox, writeInbox, pushToInbox } = require("./inboxStore");
 
 const settingsRouter = require("./routes/settings");
-const personaRouter = require("./routes/persona");
-const embeddingRouter = require("./routes/embedding");
 const chatgptImportRouter = require("./routes/chatgptImport");
 const attachmentsRouter = require("./routes/attachments");
 const connectorsRouter = require("./routes/connectors");
+// Object embedding (POST /api/objects/:objectId/embed) is proxied to the
+// memory-process below, not handled here — it used to be required and
+// mounted directly in this process (`./routes/embedding`), which loaded a
+// second, independent ~1.5-2GB copy of the ONNX embedding model into THIS
+// process on top of the one memory-process already loads for its own
+// Auto-Heal job. Same model, same file, two separate copies in memory for
+// no benefit — proxying instead means exactly one process ever loads it.
+
+// The consolidator/auto-heal jobs and the persona routes now live in their
+// own OS process (server/memory-process/index.js) — spawned and proxied
+// below. This is the capture/memory process split: a hang or crash on the
+// memory side can no longer take the inbox/attachments/connectors endpoints
+// down with it, since they're no longer sharing an event loop.
+const MEMORY_HOST = "127.0.0.1";
+const MEMORY_PORT = process.env.MEMORY_PORT || 4578;
 
 const HOST = "127.0.0.1"; // localhost-only — never 0.0.0.0
 const PORT = process.env.CHRONICLE_PORT || 4577;
 
 const allowedOriginsPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$|^chrome-extension:\/\//;
+
+// Forwards a request byte-for-byte to the memory-process over loopback and
+// streams the response back — including SSE (the /runs/:runId/events route
+// depends on this staying a stream, not a buffered read). If the
+// memory-process is down, mid-restart, or hung, this fails fast with a 503
+// instead of hanging the capture process's own event loop waiting on it.
+async function proxyToMemory(req, res) {
+  const target = `http://${MEMORY_HOST}:${MEMORY_PORT}${req.originalUrl}`;
+  try {
+    const headers = { ...req.headers };
+    // Hop-by-hop / connection-specific headers that must never be forwarded
+    // as-is: `host` would point fetch at the wrong origin, `content-length`
+    // is recomputed below for the re-serialized body, and undici's fetch()
+    // outright throws NotSupportedError on `expect` (PowerShell's
+    // Invoke-RestMethod, curl, and other clients send `Expect: 100-continue`
+    // on POSTs with a body — this broke every POST through this proxy,
+    // not just this route). `connection`/`transfer-encoding` are similarly
+    // connection-specific and never valid to replay on a new request.
+    delete headers.host;
+    delete headers["content-length"];
+    delete headers.expect;
+    delete headers.connection;
+    delete headers["transfer-encoding"];
+
+    const init = { method: req.method, headers };
+    if (!["GET", "HEAD"].includes(req.method)) {
+      init.body = JSON.stringify(req.body ?? {});
+    }
+
+    const upstream = await fetch(target, init);
+    res.status(upstream.status);
+    upstream.headers.forEach((value, key) => {
+      if (key.toLowerCase() === "content-encoding") return; // fetch already decoded the body
+      res.setHeader(key, value);
+    });
+
+    if (upstream.body) {
+      Readable.fromWeb(upstream.body).pipe(res);
+    } else {
+      res.end();
+    }
+  } catch (err) {
+    console.error("[proxyToMemory] failed:", req.method, req.originalUrl, err.message, err.cause);
+    res.status(503).json({ error: "Chronicle's memory-process is unreachable.", detail: err.message });
+  }
+}
 
 const app = express();
 app.use(
@@ -54,9 +115,15 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: "10mb" }));
 
+// Persona (and embedding) requests are forwarded to the memory-process over
+// loopback. Mounted before settingsRouter so these more specific prefixes
+// get first crack at matching; settingsRouter's own paths (token, status,
+// embedding-model, seed) don't overlap with them and fall through untouched.
+app.use("/api/settings/capture-activity", proxyToMemory);
+app.use("/api/persona", proxyToMemory);
+app.post("/api/objects/:objectId/embed", proxyToMemory);
+
 app.use("/api/settings", settingsRouter);
-app.use("/api/persona", personaRouter);
-app.use("/api/objects", embeddingRouter); // POST /api/objects/:objectId/embed
 app.use("/api/settings/chatgpt-import", chatgptImportRouter);
 app.use("/api/attachments", attachmentsRouter);
 app.use("/api/connectors", connectorsRouter);
@@ -115,8 +182,39 @@ app.delete("/api/inbox", (_req, res) => {
   res.json({ success: true });
 });
 
-// Start background jobs (auto-heal, consolidator)
-startBackgroundJobs();
+// Spawn the memory-process (consolidator/auto-heal jobs, persona routes,
+// the embedding pipeline) as its own OS process. stdio: "inherit" so its
+// console output still shows up in the same terminal as Chronicle's own
+// (concurrently already merges frontend+server output the same way).
+// Restarted on unexpected exit — but critically, while it's down or
+// restarting, Chronicle's own capture endpoints keep serving requests
+// without interruption.
+let memoryProcess = null;
+let stoppingMemoryIntentionally = false;
+
+function startMemoryProcess() {
+  memoryProcess = spawn(
+    process.execPath,
+    [path.join(__dirname, "memory-process", "index.js")],
+    { stdio: "inherit", env: process.env }
+  );
+
+  memoryProcess.on("exit", (code, signal) => {
+    console.log(`[Chronicle] memory-process exited (code=${code}, signal=${signal})`);
+    memoryProcess = null;
+    if (!stoppingMemoryIntentionally) {
+      console.log("[Chronicle] memory-process exited unexpectedly — restarting in 3s...");
+      setTimeout(startMemoryProcess, 3000);
+    }
+  });
+
+  memoryProcess.on("error", (err) => {
+    console.error("[Chronicle] Failed to start memory-process:", err.message);
+    memoryProcess = null;
+  });
+}
+
+startMemoryProcess();
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`\n  Chronicle local API running at http://${HOST}:${PORT}`);
@@ -126,6 +224,14 @@ const server = app.listen(PORT, HOST, () => {
 
 function shutdown() {
   console.log("\n  Shutting down Chronicle...");
+  stoppingMemoryIntentionally = true;
+  if (memoryProcess) {
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", memoryProcess.pid, "/f", "/t"]);
+    } else {
+      memoryProcess.kill("SIGTERM");
+    }
+  }
   server.close(() => process.exit(0));
 }
 

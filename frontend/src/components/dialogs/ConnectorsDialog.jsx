@@ -168,7 +168,7 @@ export function ConnectorsDialog({ open, onOpenChange }) {
     try {
       const result = await syncConnector(id);
       if (result.ok) {
-        showNote(`Synced ${result.posts?.length || 0} posts from WordPress.`);
+        showNote(`Queued ${result.posts?.length || 0} posts from WordPress — they'll appear shortly.`);
       } else {
         showNote(`Sync failed: ${result.error}`, "error");
       }

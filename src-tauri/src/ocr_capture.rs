@@ -1,6 +1,5 @@
 use std::ffi::c_void;
 
-use windows::core::HSTRING;
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
@@ -10,7 +9,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
 
 use windows::Media::Ocr::OcrEngine;
-use windows::Graphics::Imaging::{SoftwareBitmap, BitmapPixelFormat, BitmapAlphaMode};
+use windows::Graphics::Imaging::{SoftwareBitmap, BitmapPixelFormat};
 use windows::Security::Cryptography::CryptographicBuffer;
 
 pub fn capture_hwnd_ocr(hwnd: HWND) -> Option<Vec<String>> {

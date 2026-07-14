@@ -1,3 +1,5 @@
+import { useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Plus } from "lucide-react";
 import { typeMeta } from "@/lib/objectTypes";
 import { relTime, displayTitle } from "@/lib/format";
@@ -51,6 +53,23 @@ function ListItem({ obj, active, onClick }) {
 export function ObjectList({ view, objects, selectedId, onSelect, onNew }) {
   const title = view === "all" ? "Everything" : typeMeta(view).label;
   const count = objects.length;
+  const scrollRef = useRef(null);
+
+  // Item height varies (title + optional 2-line preview + tag row), so this
+  // uses dynamic measurement (measureElement below) rather than a fixed
+  // size — estimateSize is just the initial guess before real heights are
+  // known. Renders only what's actually visible in the scroll viewport
+  // (plus a small overscan buffer) instead of every object in `objects` at
+  // once — with hundreds/thousands of captured chats and activity items
+  // accumulating over time, mounting one <button> per object regardless of
+  // scroll position is what made the list (and the whole app, since this
+  // panel is always mounted) feel sluggish as the archive grew.
+  const rowVirtualizer = useVirtualizer({
+    count,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 84,
+    overscan: 8,
+  });
 
   return (
     <div className="flex h-full w-[360px] shrink-0 flex-col border-r border-border">
@@ -71,19 +90,37 @@ export function ObjectList({ view, objects, selectedId, onSelect, onNew }) {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 pb-4 no-scrollbar">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 pb-4 no-scrollbar">
         {count === 0 ? (
           <ListEmpty />
         ) : (
-          <div className="space-y-1">
-            {objects.map((o) => (
-              <ListItem
-                key={o.id}
-                obj={o}
-                active={o.id === selectedId}
-                onClick={() => onSelect(o.id)}
-              />
-            ))}
+          <div
+            style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}
+          >
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const o = objects[virtualRow.index];
+              return (
+                <div
+                  key={o.id}
+                  data-index={virtualRow.index}
+                  ref={rowVirtualizer.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualRow.start}px)`,
+                    paddingBottom: 4, // preserves the old space-y-1 gap between rows
+                  }}
+                >
+                  <ListItem
+                    obj={o}
+                    active={o.id === selectedId}
+                    onClick={() => onSelect(o.id)}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

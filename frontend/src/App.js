@@ -9,6 +9,7 @@ import { pollInbox } from "@/services/inboxSync";
 import { runAutomaticPersonaMaintenance } from "@/services/personaSync";
 import { findRelatedLocal } from "@/services/weave";
 import { startUiaCaptureListener } from "@/services/uiaCapture";
+import { fetchSystemStatus } from "@/services/statusService";
 import { invokeTauri } from "@/lib/tauri";
 import { Sidebar } from "@/components/Sidebar";
 import { ObjectList } from "@/components/ObjectList";
@@ -23,6 +24,8 @@ import { PersonaDialog } from "@/components/dialogs/PersonaDialog";
 import { GraphDialog } from "@/components/dialogs/GraphDialog";
 import { AddTypeDialog } from "@/components/dialogs/AddTypeDialog";
 import { EngineDialog } from "@/components/dialogs/EngineDialog";
+import { DedupDialog } from "@/components/dialogs/DedupDialog";
+import { CaptureLogDialog } from "@/components/dialogs/CaptureLogDialog";
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -36,7 +39,8 @@ export default function App() {
   const [weaveOpen, setWeaveOpen] = useState(false);
   const [pulseBusy, setPulseBusy] = useState(false);
 
-  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false });
+  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false, dedup: false, captureLog: false });
+  const [globalStatus, setGlobalStatus] = useState(null);
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -110,14 +114,25 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  // System status monitoring (every 30s)
+  useEffect(() => {
+    const checkStatus = async () => {
+      const status = await fetchSystemStatus();
+      setGlobalStatus(status);
+    };
+    const id = setInterval(checkStatus, 30000);
+    checkStatus();
+    return () => clearInterval(id);
+  }, []);
+
   // Native Windows UI Automation activity capture (desktop app only — a
   // no-op in a plain browser preview, same fail-silent pattern as every
   // other Tauri-dependent feature). Off by default; only starts if the user
   // has actually opted in via Settings.
   useEffect(() => {
-    const { uiaCaptureEnabled, uiaCaptureText } = getSettings();
+    const { uiaCaptureEnabled, uiaCaptureText, uiaCaptureOcrFallback } = getSettings();
     if (!uiaCaptureEnabled) return;
-    invokeTauri("start_uia_capture", { includeText: !!uiaCaptureText });
+    invokeTauri("start_uia_capture", { includeText: !!uiaCaptureText, ocrFallback: !!uiaCaptureOcrFallback });
     startUiaCaptureListener();
   }, []);
 
@@ -216,6 +231,8 @@ export default function App() {
         onPersona={() => setDlg((d) => ({ ...d, persona: true }))}
         onGraph={() => setDlg((d) => ({ ...d, graph: true }))}
         onEngine={() => setDlg((d) => ({ ...d, engine: true }))}
+        onDedup={() => setDlg((d) => ({ ...d, dedup: true }))}
+        onCaptureLog={() => setDlg((d) => ({ ...d, captureLog: true }))}
         onLock={() => setAuthenticated(false)}
         onSettings={() => setDlg((d) => ({ ...d, settings: true }))}
         workspaceName={workspaceName}
@@ -296,6 +313,35 @@ export default function App() {
         open={dlg.engine}
         onOpenChange={(v) => setDlg((d) => ({ ...d, engine: v }))}
       />
+      <DedupDialog
+        open={dlg.dedup}
+        onOpenChange={(v) => {
+          setDlg((d) => ({ ...d, dedup: v }));
+          // Deletions happen directly against the repository inside the
+          // dialog — refresh App's own object state once it closes so the
+          // list/counts reflect whatever was actually removed.
+          if (!v) refresh();
+        }}
+      />
+      <CaptureLogDialog
+        open={dlg.captureLog}
+        onOpenChange={(v) => setDlg((d) => ({ ...d, captureLog: v }))}
+      />
+
+      {globalStatus && (globalStatus.backend !== 'ok' || globalStatus.db !== 'ok') && (
+        <div className="fixed bottom-4 left-4 z-50 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive backdrop-blur shadow-lg flex items-center gap-3">
+          <span className="relative flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-destructive"></span>
+          </span>
+          <div>
+            <strong>System Offline:</strong> {globalStatus.backend !== 'ok' ? 'Node.js server unreachable.' : 'PostgreSQL Database unreachable.'}
+          </div>
+          <button onClick={() => setDlg(d => ({ ...d, engine: true }))} className="ml-2 text-xs underline">
+            Details
+          </button>
+        </div>
+      )}
 
       <Toaster position="bottom-center" theme="light" toastOptions={{ style: { background: "hsl(30 12% 22%)", color: "hsl(36 33% 97%)", border: "none" } }} />
     </div>

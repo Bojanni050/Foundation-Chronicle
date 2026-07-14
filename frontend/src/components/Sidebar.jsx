@@ -12,6 +12,8 @@ import {
   Waypoints,
   Cpu,
   Lock,
+  Copy,
+  Radio,
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
 import { useTypes } from "@/hooks/useTypes";
@@ -59,6 +61,8 @@ export function Sidebar({
   onPersona,
   onGraph,
   onEngine,
+  onDedup,
+  onCaptureLog,
   onLock,
   onSettings,
   workspaceName,
@@ -212,6 +216,8 @@ export function Sidebar({
         <NavRow icon={Fingerprint} label="Persona" active={false} onClick={onPersona} testId="nav-persona" />
         <NavRow icon={Waypoints} label="Knowledge graph" active={false} onClick={onGraph} testId="nav-graph" />
         <NavRow icon={Cpu} label="Chronicle Engine" active={false} onClick={onEngine} testId="nav-engine" />
+        <NavRow icon={Copy} label="Find duplicates" active={false} onClick={onDedup} testId="nav-dedup" />
+        <NavRow icon={Radio} label="Capture log" active={false} onClick={onCaptureLog} testId="nav-capture-log" />
         <NavRow icon={Lock} label="Lock workspace" active={false} onClick={onLock} testId="nav-lock" />
         <button
           onClick={onSettings}

@@ -54,9 +54,36 @@ async function getPipeline() {
 // requiring every call site to remember to cap its own input.
 const MAX_EMBED_CHARS = 8000;
 
+// The 8000-char cap above bounds byte length, but not token count — a
+// whitespace-free run (base64 data: URIs, minified/obfuscated code, hex
+// dumps) gives the BPE tokenizer no natural split points, so it can produce
+// far more tokens per character than normal prose. Self-attention cost
+// scales with the *square* of token count, which is how a previous incident
+// (see comment above) turned one such string into a ~13GB allocation well
+// under the character cap. This measures whitespace density over the tail
+// end of the (already 8000-char-capped) input — the densest, most-recently-
+// added text in a growing UIA-capture session — and drops to a much smaller
+// cap when it looks nothing like normal language.
+const MIN_WHITESPACE_RATIO = 0.04; // normal prose is comfortably above this
+const SPARSE_WHITESPACE_MAX_CHARS = 500;
+
+function hasNormalWhitespaceDensity(text) {
+  if (text.length < 200) return true; // too short for the ratio to be meaningful
+  const whitespaceCount = (text.match(/\s/g) || []).length;
+  return whitespaceCount / text.length >= MIN_WHITESPACE_RATIO;
+}
+
 async function embed(text) {
   const extractor = await getPipeline();
-  const input = text.length > MAX_EMBED_CHARS ? text.slice(0, MAX_EMBED_CHARS) : text;
+  let input = text.length > MAX_EMBED_CHARS ? text.slice(0, MAX_EMBED_CHARS) : text;
+  if (!hasNormalWhitespaceDensity(input)) {
+    console.warn(
+      `[embed] Input has abnormally low whitespace density (${input.length} chars) — ` +
+      `likely base64/binary/minified content, not language. Truncating to ${SPARSE_WHITESPACE_MAX_CHARS} chars ` +
+      `to avoid an oversized tokenization (see MAX_EMBED_CHARS comment above).`
+    );
+    input = input.slice(0, SPARSE_WHITESPACE_MAX_CHARS);
+  }
   const output = await extractor(input, { pooling: "mean", normalize: true });
   return Array.from(output.data);
 }

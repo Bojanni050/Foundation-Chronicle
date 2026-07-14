@@ -21,6 +21,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from transport import load_state, save_state, post_import, post_attachment
 from chatgpt_provider import ChatGPTProvider
 from gemini_provider import GeminiProvider
+from claude_export import import_from_export
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE_FILE = Path(__file__).resolve().parent / "imported.json"
@@ -111,7 +112,8 @@ def main():
     parser.add_argument("--limit", type=int, default=None, help="Only import the N most recent conversations")
     parser.add_argument("--headless", action="store_true", help="Run without a visible browser window")
     parser.add_argument("--delay", type=float, default=2.0, help="Seconds to wait between conversations")
-    parser.add_argument("--provider", choices=["chatgpt", "gemini"], default="chatgpt", help="Which provider to import from")
+    parser.add_argument("--provider", choices=["chatgpt", "gemini", "claude"], default="chatgpt", help="Which provider to import from")
+    parser.add_argument("--export-path", default=None, help="Path to the Anthropic export .zip or extracted folder (--provider claude only)")
     args = parser.parse_args()
 
     token = args.token
@@ -124,6 +126,19 @@ def main():
 
     state = load_state(STATE_FILE)
     imported = set(state.get("imported_urls", []))
+
+    # Claude's official data export is already structured JSON — no browser,
+    # no login-wait, no scrolling. Handled entirely separately from the
+    # Playwright-driven providers below.
+    if args.provider == "claude":
+        if not args.export_path:
+            print("--export-path is required for --provider claude (path to the export .zip or extracted folder).")
+            sys.exit(1)
+        done = import_from_export(args.export_path, args.api_url, token, imported, limit=args.limit)
+        state["imported_urls"] = sorted(list(imported))
+        save_state(STATE_FILE, state)
+        print(f"Done. Imported {done} new conversation(s); already-imported ones were skipped.")
+        return
 
     if args.provider == "gemini":
         provider = GeminiProvider()
