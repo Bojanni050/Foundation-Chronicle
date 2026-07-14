@@ -14,6 +14,7 @@ import {
   Lock,
   Copy,
   Radio,
+  Brain,
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
 import { useTypes } from "@/hooks/useTypes";
@@ -63,6 +64,7 @@ export function Sidebar({
   onEngine,
   onDedup,
   onCaptureLog,
+  onMemory,
   onLock,
   onSettings,
   workspaceName,
@@ -218,6 +220,7 @@ export function Sidebar({
         <NavRow icon={Cpu} label="Chronicle Engine" active={false} onClick={onEngine} testId="nav-engine" />
         <NavRow icon={Copy} label="Find duplicates" active={false} onClick={onDedup} testId="nav-dedup" />
         <NavRow icon={Radio} label="Capture log" active={false} onClick={onCaptureLog} testId="nav-capture-log" />
+        <NavRow icon={Brain} label="Evidence memory" active={false} onClick={onMemory} testId="nav-memory" />
         <NavRow icon={Lock} label="Lock workspace" active={false} onClick={onLock} testId="nav-lock" />
         <button
           onClick={onSettings}

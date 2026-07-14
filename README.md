@@ -37,6 +37,16 @@ To run the application, start both the Express API backend and the React fronten
    ```bash
    npm run install:all
    ```
+3. Apply database migrations:
+   ```bash
+   npm run db:migrate
+   ```
+
+   To verify the immutable episode/evidence contract against the local
+   database without leaving test data behind:
+   ```bash
+   npm run db:test:episode
+   ```
 
 ### Running the App
 - **Browser Mode**: Launches React on port `3000` and starts the Node server concurrently.

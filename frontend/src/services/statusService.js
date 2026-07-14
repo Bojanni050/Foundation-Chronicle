@@ -5,6 +5,7 @@ export async function fetchSystemStatus() {
     backend: "offline",
     db: "offline",
     embeddings: "offline",
+    memorySchema: "unknown",
     llm: "offline",
     tauri: "offline",
     tauriMessage: "",
@@ -22,6 +23,7 @@ export async function fetchSystemStatus() {
         result.backend = "ok";
         result.db = data.db;
         result.embeddings = data.embeddings;
+        result.memorySchema = data.memorySchema || "unknown";
       }
     }
   } catch (err) {

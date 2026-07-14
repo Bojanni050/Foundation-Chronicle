@@ -26,6 +26,7 @@ import { AddTypeDialog } from "@/components/dialogs/AddTypeDialog";
 import { EngineDialog } from "@/components/dialogs/EngineDialog";
 import { DedupDialog } from "@/components/dialogs/DedupDialog";
 import { CaptureLogDialog } from "@/components/dialogs/CaptureLogDialog";
+import { MemoryDialog } from "@/components/dialogs/MemoryDialog";
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -39,7 +40,7 @@ export default function App() {
   const [weaveOpen, setWeaveOpen] = useState(false);
   const [pulseBusy, setPulseBusy] = useState(false);
 
-  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false, dedup: false, captureLog: false });
+  const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false, dedup: false, captureLog: false, memory: false });
   const [globalStatus, setGlobalStatus] = useState(null);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -233,6 +234,7 @@ export default function App() {
         onEngine={() => setDlg((d) => ({ ...d, engine: true }))}
         onDedup={() => setDlg((d) => ({ ...d, dedup: true }))}
         onCaptureLog={() => setDlg((d) => ({ ...d, captureLog: true }))}
+        onMemory={() => setDlg((d) => ({ ...d, memory: true }))}
         onLock={() => setAuthenticated(false)}
         onSettings={() => setDlg((d) => ({ ...d, settings: true }))}
         workspaceName={workspaceName}
@@ -326,6 +328,11 @@ export default function App() {
       <CaptureLogDialog
         open={dlg.captureLog}
         onOpenChange={(v) => setDlg((d) => ({ ...d, captureLog: v }))}
+      />
+      <MemoryDialog
+        open={dlg.memory}
+        onOpenChange={(v) => setDlg((d) => ({ ...d, memory: v }))}
+        selectedObject={selectedObject}
       />
 
       {globalStatus && (globalStatus.backend !== 'ok' || globalStatus.db !== 'ok') && (

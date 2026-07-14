@@ -16,11 +16,29 @@ router.get("/status", async (_req, res) => {
   const status = {
     db: "offline",
     embeddings: "offline",
+    memorySchema: "unknown",
   };
 
   try {
-    const { rows } = await pool.query("SELECT 1 AS ok");
-    if (rows[0].ok === 1) status.db = "ok";
+    const { rows } = await pool.query(
+      `SELECT
+         1 AS ok,
+         to_regclass('public.episode') IS NOT NULL AS episode_exists,
+         EXISTS (
+           SELECT 1
+           FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name = 'evidence'
+             AND column_name = 'episode_id'
+             AND is_nullable = 'NO'
+         ) AS evidence_episode_required`,
+    );
+    if (rows[0].ok === 1) {
+      status.db = "ok";
+      status.memorySchema = rows[0].episode_exists && rows[0].evidence_episode_required
+        ? "ok"
+        : "migration_required";
+    }
   } catch (err) {
     status.dbError = err.message;
   }
