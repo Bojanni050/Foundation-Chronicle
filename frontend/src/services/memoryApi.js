@@ -40,6 +40,17 @@ export function listHypotheses(status) {
   return memoryRequest(`/hypotheses${query}`);
 }
 
+// Semantic search across hypotheses and facts together — each result carries
+// its own semanticRelevance/temporalFit/sourceQuality/confidence axes
+// (server/retrievalPolicy.js), not just a combined score, so a caller can
+// re-rank or filter by whichever axis matters for the question at hand.
+export function searchMemory(q, { asOf, limit } = {}) {
+  const params = new URLSearchParams({ q });
+  if (asOf) params.set("asOf", asOf);
+  if (limit) params.set("limit", String(limit));
+  return memoryRequest(`/search?${params.toString()}`);
+}
+
 // Every confirmed hypothesis's resulting fact — a distinct, append-only
 // record, not just a status flag on the hypothesis (see server/routes/
 // memory.js's /hypotheses/:id/confirm for how a fact comes to exist).

@@ -16,6 +16,7 @@ const {
 } = require("../epistemicPolicy");
 const { prepareEpisodeInput } = require("../episodePolicy");
 const { embed } = require("../embedding");
+const { temporalFit, sourceQualityFromEvidence, confidenceScore, combinedScore } = require("../retrievalPolicy");
 const { buildMemoryExport } = require("../memoryExport");
 const { restoreMemory, preflightMemoryRestore } = require("../memoryRestore");
 const {
@@ -28,6 +29,96 @@ const { auditMemoryIntegrity, purgeOrphanDerivedIndexes } = require("../memoryIn
 const router = express.Router();
 
 const EVIDENCE_DIRECTIONS = ["supporting", "contradicting", "contextualizing"];
+
+// GET /api/memory/search?q=<text>&asOf=<ISO?>&limit=<n?> — semantic search
+// across hypotheses and facts together, ranked on four separately-visible
+// axes (server/retrievalPolicy.js) rather than one opaque score: semantic
+// relevance, temporal fit, source quality, and confidence. `score` is only
+// ever a default sort order — every axis stays on each result so a caller
+// can re-rank by whichever one actually matters for their question, instead
+// of trusting a single blended number.
+//
+// Facts don't carry their own embedding: fact.inhoud is copied verbatim from
+// the confirming hypothesis's hypothese text (buildFactFromHypothesis), so
+// the source hypothesis's embedding already represents it exactly — joining
+// avoids a second embed() call and a second stored vector for identical text.
+router.get("/search", async (req, res, next) => {
+  const { q, asOf, limit } = req.query;
+  if (!q) return res.status(400).json({ error: "q required" });
+  const resultLimit = Math.min(parseInt(limit, 10) || 10, 50);
+  const asOfIso = asOf || new Date().toISOString();
+
+  let embeddingLiteral;
+  try {
+    embeddingLiteral = `[${(await embed(q)).join(",")}]`;
+  } catch (err) {
+    return res.status(503).json({ error: "local embedding unavailable: " + err.message });
+  }
+
+  try {
+    const { rows: hypRows } = await pool.query(
+      `SELECT *, 1 - (embedding <=> $1) AS semantic_relevance
+       FROM hypothesis
+       WHERE embedding IS NOT NULL
+       ORDER BY embedding <=> $1
+       LIMIT $2`,
+      [embeddingLiteral, resultLimit]
+    );
+    const { rows: factRows } = await pool.query(
+      `SELECT f.*, 1 - (h.embedding <=> $1) AS semantic_relevance
+       FROM fact f
+       JOIN hypothesis h ON h.id = f.hypothesis_id
+       WHERE h.embedding IS NOT NULL
+       ORDER BY h.embedding <=> $1
+       LIMIT $2`,
+      [embeddingLiteral, resultLimit]
+    );
+    const { rows: supersededRows } = await pool.query(
+      "SELECT DISTINCT supersedes_fact_id FROM fact WHERE supersedes_fact_id IS NOT NULL"
+    );
+    const supersededIds = new Set(supersededRows.map((r) => r.supersedes_fact_id));
+
+    async function evidenceFor(hypothesisId) {
+      const { rows } = await pool.query(
+        `SELECT e.*, to_jsonb(ep) AS episode
+         FROM evidence e JOIN episode ep ON ep.id = e.episode_id
+         WHERE e.hypothesis_id = $1`,
+        [hypothesisId]
+      );
+      return rows;
+    }
+
+    const hypothesisResults = [];
+    for (const hyp of hypRows) {
+      const evidenceRows = await evidenceFor(hyp.id);
+      const axes = {
+        semanticRelevance: hyp.semantic_relevance,
+        temporalFit: temporalFit(hyp, asOfIso),
+        sourceQuality: sourceQualityFromEvidence(evidenceRows),
+        confidence: confidenceScore({ status: hyp.status, verdict: isVerified(evidenceRows) }),
+      };
+      hypothesisResults.push({ kind: "hypothesis", id: hyp.id, text: hyp.hypothese, status: hyp.status, axes, score: combinedScore(axes) });
+    }
+
+    const factResults = [];
+    for (const fact of factRows) {
+      const evidenceRows = await evidenceFor(fact.hypothesis_id);
+      const superseded = supersededIds.has(fact.id);
+      const axes = {
+        semanticRelevance: fact.semantic_relevance,
+        temporalFit: temporalFit(fact, asOfIso),
+        sourceQuality: sourceQualityFromEvidence(evidenceRows),
+        confidence: confidenceScore({ status: "confirmed", superseded }),
+      };
+      factResults.push({ kind: "fact", id: fact.id, text: fact.inhoud, superseded, axes, score: combinedScore(axes) });
+    }
+
+    const results = [...hypothesisResults, ...factResults].sort((a, b) => b.score - a.score).slice(0, resultLimit);
+    res.json({ query: q, asOf: asOfIso, results });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // GET /api/memory/export — portable PostgreSQL half of a Chronicle backup.
 // The frontend combines this with IndexedDB objects, custom types, and raw
