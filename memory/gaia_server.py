@@ -3,33 +3,61 @@ import os
 import logging
 import json
 import queue
+import shutil
 import threading
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# --------------------------------------------------------------------------
+# Option B: Gaia gets its own dedicated HERMES_HOME, isolated from the
+# user's personal Hermes CLI config/state/skills — must be set before any
+# hermes_cli/agent/run_agent import, since several module-level call sites
+# resolve HERMES_HOME eagerly. See docs/hermes-chronicle-integratie.md.
+# --------------------------------------------------------------------------
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+GAIA_HERMES_HOME = Path(os.environ.get("GAIA_HERMES_HOME", _REPO_ROOT / "server" / "data" / "gaia-hermes-home"))
+os.environ["HERMES_HOME"] = str(GAIA_HERMES_HOME)
+GAIA_HERMES_HOME.mkdir(parents=True, exist_ok=True)
+
+# Sync the tracked plugin source (memory/chronicle_plugin/) into the runtime
+# home's plugins/ directory — $HERMES_HOME is ephemeral/gitignored, so the
+# actual plugin code lives in the repo and gets copied in fresh on every
+# startup, the same way `hermes` itself expects a user-installed provider at
+# $HERMES_HOME/plugins/<name>/ (see plugins/memory/__init__.py's own
+# docstring: "User-installed providers: $HERMES_HOME/plugins/<name>/").
+_PLUGIN_SRC = Path(__file__).resolve().parent / "chronicle_plugin"
+_PLUGIN_DEST = GAIA_HERMES_HOME / "plugins" / "chronicle"
+if _PLUGIN_SRC.is_dir():
+    shutil.rmtree(_PLUGIN_DEST, ignore_errors=True)
+    shutil.copytree(_PLUGIN_SRC, _PLUGIN_DEST)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
-from chronicle_memory_provider import ChronicleMemoryProvider
+# Activates the plugin just synced above — memory.provider is the one config
+# key that selects which external provider AIAgent's own init wires up
+# automatically (agent/agent_init.py). Nothing else here needs to touch the
+# provider directly; AIAgent constructs it, calls initialize()/prefetch()/
+# sync_turn() on its own via agent._memory_manager (agent/memory_manager.py).
+from hermes_cli.config import set_config_value
+set_config_value("memory.provider", "chronicle")
+
 from run_agent import AIAgent
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [Gaia] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Globale instantiaties
-provider = None
+# Globale instantiatie
 agent = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global provider, agent
-    logger.info("Starting Hermes Agent (Gaia) subprocess...")
-    
-    # Initialiseer de Chronicle Memory Provider voor Hermes
-    provider = ChronicleMemoryProvider()
-    provider.initialize(session_id="gaia_session_init", platform="chronicle")
-    
+    global agent
+    logger.info("Starting Hermes Agent (Gaia) subprocess... (HERMES_HOME=%s)", GAIA_HERMES_HOME)
+
     # Initialiseer de werkelijke Hermes agent
     # Hermes auto-detecteert OpenRouter via OPENROUTER_API_KEY en zet de base_url zelf.
     # OpenRouter verwacht het model ZONDER 'openrouter/' prefix — die strippen we hier.
@@ -37,20 +65,25 @@ async def lifespan(app: FastAPI):
     if agent_model.startswith("openrouter/"):
         agent_model = agent_model[len("openrouter/"):]
     logger.info(f"Initializing Hermes with model: {agent_model}")
+    # session_id is intentionally omitted — AIAgent generates a real, unique
+    # one itself (agent/agent_init.py) when none is passed, instead of the
+    # constant "gaia_session_init" this used to hardcode for the (now
+    # removed) manual provider pre-init. platform="chronicle" so the
+    # Chronicle memory provider's initialize() sees an honest platform
+    # value instead of the "cli" default.
     agent = AIAgent(
         model=agent_model,
-        quiet_mode=True
+        quiet_mode=True,
+        platform="chronicle",
     )
-    
-    # TODO: Registreer de provider bij de agent.
-    # Bijv. agent.memory_providers.append(provider) of agent.register_provider(provider)
-    
+
     logger.info("Hermes Agent is running via FastAPI on port 4579...")
     yield # Hier draait de server
-    
+
     logger.info("Hermes Agent is stopping...")
-    if provider:
-        provider.shutdown()
+    memory_manager = getattr(agent, "_memory_manager", None)
+    if memory_manager:
+        memory_manager.shutdown_all()
     logger.info("Hermes Agent shut down cleanly.")
 
 app = FastAPI(lifespan=lifespan)
