@@ -66,6 +66,20 @@ export function purgeDerivedMemory() {
   });
 }
 
+export function auditMemoryIntegrity(objectIds) {
+  return memoryRequest("/maintenance/integrity-audit", {
+    method: "POST",
+    body: JSON.stringify({ objectIds }),
+  });
+}
+
+export function purgeOrphanDerivedIndexes(objectIds) {
+  return memoryRequest("/maintenance/purge-orphan-indexes", {
+    method: "POST",
+    body: JSON.stringify({ objectIds, confirmation: "PURGE_ORPHAN_DERIVED_INDEXES" }),
+  });
+}
+
 export function getHypothesis(id) {
   return memoryRequest(`/hypotheses/${encodeURIComponent(id)}`);
 }

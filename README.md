@@ -92,6 +92,18 @@ fingerprints with that baseline and blocks a healthy result when referenced
 attachment files are missing. Chronicle calls this the last generated export,
 because browser download APIs cannot prove where a file was ultimately saved.
 
+The same data-management area includes a cross-store integrity audit. It
+reports missing source-object references from episodes, knowledge, and usage
+logs, plus missing attachments and derived indexes without a source object.
+Only orphan derived indexes can be repaired automatically; provenance findings
+remain report-only so immutable evidence is never silently rewritten.
+
+When an episode's source object is missing, the audit can also preview a
+partial reconstruction from every immutable episode for that source ID. After
+explicit confirmation Chronicle creates a locked IndexedDB object under the
+original ID, clearly labelled as recovered rather than pretending it is the
+original source.
+
 ### 🔐 Local Username & PIN Lock Screen
 * Secure your local workspace. On first launch, set up a username and choose a 4-to-6 digit security PIN code.
 * Interactive numpad with tactile hover effects, keyboard bind entries (`0-9` and `Backspace`), shake animation error handlers, and a "Lock Workspace" action in the sidebar.

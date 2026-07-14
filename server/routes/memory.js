@@ -21,6 +21,7 @@ const {
   getObjectIndexInventory,
   purgeDerivedMemory,
 } = require("../memoryMaintenance");
+const { auditMemoryIntegrity, purgeOrphanDerivedIndexes } = require("../memoryIntegrity");
 
 const router = express.Router();
 
@@ -69,6 +70,24 @@ router.get("/maintenance/object-indexes", async (_req, res, next) => {
 router.post("/maintenance/purge-derived", async (req, res, next) => {
   try {
     res.json(await purgeDerivedMemory(pool, req.body?.confirmation));
+  } catch (err) {
+    if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+    return next(err);
+  }
+});
+
+router.post("/maintenance/integrity-audit", async (req, res, next) => {
+  try {
+    res.json(await auditMemoryIntegrity(pool, req.body));
+  } catch (err) {
+    if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+    return next(err);
+  }
+});
+
+router.post("/maintenance/purge-orphan-indexes", async (req, res, next) => {
+  try {
+    res.json(await purgeOrphanDerivedIndexes(pool, req.body));
   } catch (err) {
     if (err instanceof TypeError) return res.status(400).json({ error: err.message });
     return next(err);

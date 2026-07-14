@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const { buildMemoryExport } = require("../server/memoryExport");
 const { restoreMemoryWithClient } = require("../server/memoryRestore");
 const { getMemoryStorageInventory, getObjectIndexInventory } = require("../server/memoryMaintenance");
+const { auditMemoryIntegrity } = require("../server/memoryIntegrity");
 
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 
@@ -114,6 +115,19 @@ try {
   const indexedObject = indexInventory.find((row) => row.object_id === indexObjectId);
   assert.equal(indexedObject.chunk_count, 1);
   assert.equal(indexedObject.embedded_chunk_count, 0);
+
+  const auditBeforeOrphan = await auditMemoryIntegrity(client, { objectIds: [indexObjectId, "obj_integration"] });
+  const orphanIndexObjectId = `obj_orphan_${randomUUID()}`;
+  await client.query(
+    "INSERT INTO object_chunk (object_id, content, order_index) VALUES ($1, $2, 0)",
+    [orphanIndexObjectId, "orphan integration test chunk"],
+  );
+  const auditAfterOrphan = await auditMemoryIntegrity(client, { objectIds: [indexObjectId, "obj_integration"] });
+  assert.equal(
+    auditAfterOrphan.orphanDerivedIndexes.count,
+    auditBeforeOrphan.orphanDerivedIndexes.count + 1,
+    "integrity audit must detect a derived index without an IndexedDB source object",
+  );
 
   await client.query("SAVEPOINT duplicate_evidence");
   try {

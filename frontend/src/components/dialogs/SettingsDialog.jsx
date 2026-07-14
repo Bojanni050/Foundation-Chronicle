@@ -24,6 +24,8 @@ import {
   purgeOrphanAttachments,
 } from "@/services/maintenanceApi";
 import { rebuildSearchIndex } from "@/services/searchReindex";
+import { repairOrphanDerivedIndexes, runIntegrityAudit } from "@/services/integrityAudit";
+import { previewSourceRecovery, recoverSourceFromEpisodes } from "@/services/provenanceRecovery";
 
 function formatBytes(value) {
   const bytes = Number(value || 0);
@@ -74,6 +76,13 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [purgeBusy, setPurgeBusy] = useState(false);
   const [reindex, setReindex] = useState(null);
   const reindexAbort = useRef(null);
+  const [integrityAudit, setIntegrityAudit] = useState(null);
+  const [integrityBusy, setIntegrityBusy] = useState(false);
+  const [integrityRepairConfirm, setIntegrityRepairConfirm] = useState(false);
+  const [integrityRepairBusy, setIntegrityRepairBusy] = useState(false);
+  const [recoveryPreview, setRecoveryPreview] = useState(null);
+  const [recoveryPreviewBusy, setRecoveryPreviewBusy] = useState("");
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
 
   const handleBackup = async () => {
     setBackupBusy(true);
@@ -202,6 +211,59 @@ export function SettingsDialog({ open, onOpenChange }) {
   };
 
   const cancelReindex = () => reindexAbort.current?.abort();
+
+  const handleIntegrityAudit = async () => {
+    setIntegrityBusy(true);
+    setIntegrityRepairConfirm(false);
+    setRecoveryPreview(null);
+    try {
+      setIntegrityAudit(await runIntegrityAudit());
+    } catch (err) {
+      toast.error(`Integrity audit failed: ${err.message}`);
+    } finally {
+      setIntegrityBusy(false);
+    }
+  };
+
+  const handleIntegrityRepair = async () => {
+    setIntegrityRepairBusy(true);
+    try {
+      const result = await repairOrphanDerivedIndexes();
+      toast.success(`Removed ${result.objectChunks} orphan chunks and ${result.objectEmbeddings} orphan embeddings`);
+      setIntegrityRepairConfirm(false);
+      await handleIntegrityAudit();
+    } catch (err) {
+      toast.error(`Index repair failed: ${err.message}`);
+    } finally {
+      setIntegrityRepairBusy(false);
+    }
+  };
+
+  const handleRecoveryPreview = async (bronObjectId) => {
+    setRecoveryPreviewBusy(bronObjectId);
+    try {
+      setRecoveryPreview(await previewSourceRecovery(bronObjectId));
+    } catch (err) {
+      toast.error(`Source recovery preview failed: ${err.message}`);
+    } finally {
+      setRecoveryPreviewBusy("");
+    }
+  };
+
+  const handleRecoverSource = async () => {
+    if (!recoveryPreview) return;
+    setRecoveryBusy(true);
+    try {
+      const result = await recoverSourceFromEpisodes(recoveryPreview.bronObjectId);
+      toast.success(`Recovered locked source object from ${result.episodeCount} immutable episode${result.episodeCount === 1 ? "" : "s"}`);
+      setRecoveryPreview(null);
+      await handleIntegrityAudit();
+    } catch (err) {
+      toast.error(`Source recovery failed: ${err.message}`);
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
 
   const handleSeed = async () => {
     setSeedBusy(true);
@@ -892,6 +954,145 @@ export function SettingsDialog({ open, onOpenChange }) {
               {maintenanceLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4 text-primary" />}
               {maintenanceLoading ? "Scanning storage…" : maintenance ? "Refresh storage scan" : "Scan local storage"}
             </button>
+
+            <div className="rounded-md border border-border bg-card/40 p-3 space-y-3" data-testid="integrity-audit-panel">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-medium text-ink">Cross-store integrity audit</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    Compares PostgreSQL provenance, knowledge usage, attachments, and derived indexes with the current IndexedDB object IDs.
+                  </p>
+                </div>
+                <button
+                  onClick={handleIntegrityAudit}
+                  disabled={integrityBusy || integrityRepairBusy || reindex?.running || purgeBusy}
+                  data-testid="run-integrity-audit-btn"
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-ink hover:bg-accent disabled:opacity-40"
+                >
+                  {integrityBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {integrityBusy ? "Auditing references…" : integrityAudit ? "Run audit again" : "Run integrity audit"}
+                </button>
+              </div>
+
+              {integrityAudit && (
+                <div className="space-y-3" data-testid="integrity-audit-results">
+                  <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-5">
+                    {[
+                      ["Episode sources", integrityAudit.missingEpisodeSources.count],
+                      ["Knowledge sources", integrityAudit.missingKnowledgeSources.count],
+                      ["Usage objects", integrityAudit.missingUsageObjects.count],
+                      ["Missing attachments", integrityAudit.missingAttachments.count],
+                      ["Orphan indexes", integrityAudit.orphanDerivedIndexes.count],
+                    ].map(([label, count]) => (
+                      <div key={label} className={`rounded border p-2 ${count ? "border-destructive/30 bg-destructive/5" : "border-border bg-background"}`}>
+                        <p className="text-muted-foreground">{label}</p>
+                        <p className={`mt-1 font-medium ${count ? "text-destructive" : "text-ink"}`}>{count}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {(integrityAudit.missingEpisodeSources.count > 0 || integrityAudit.missingKnowledgeSources.count > 0 || integrityAudit.missingUsageObjects.count > 0 || integrityAudit.missingAttachments.count > 0) && (
+                    <div className="space-y-1 text-[11px] text-muted-foreground">
+                      <p>Provenance issues are report-only: restore the missing source object or review the affected immutable record manually.</p>
+                      {[...new Map(integrityAudit.missingEpisodeSources.items.map((item) => [item.bron_object_id, item])).values()].slice(0, 3).map((item) => (
+                        <div key={item.bron_object_id} className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="break-all">Episode source missing: {item.bron_object_id}</p>
+                          <button
+                            onClick={() => handleRecoveryPreview(item.bron_object_id)}
+                            disabled={!!recoveryPreviewBusy || recoveryBusy}
+                            className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 text-[11px] text-ink hover:bg-accent disabled:opacity-40"
+                            data-testid={`preview-source-recovery-${item.id}`}
+                          >
+                            {recoveryPreviewBusy === item.bron_object_id && <Loader2 className="h-3 w-3 animate-spin" />}
+                            Preview recovery
+                          </button>
+                        </div>
+                      ))}
+                      {integrityAudit.missingKnowledgeSources.items.slice(0, 2).map((item) => (
+                        <p key={item.id} className="break-all">Knowledge “{item.kenmerk}” → missing {item.missing_object_ids.join(", ")}</p>
+                      ))}
+                      {integrityAudit.missingAttachments.items.slice(0, 3).map((id) => (
+                        <p key={id} className="break-all">Missing attachment {id}</p>
+                      ))}
+                    </div>
+                  )}
+
+                  {recoveryPreview && (
+                    <div className="rounded border border-primary/30 bg-primary/5 p-3 space-y-2" data-testid="source-recovery-preview">
+                      <div>
+                        <p className="text-xs font-medium text-ink">Recover “{recoveryPreview.draft.title}”</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {recoveryPreview.episodeCount} immutable episodes · {recoveryPreview.evidenceCount} evidence links · {recoveryPreview.hypothesisCount} hypotheses
+                        </p>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Chronicle will create a locked object with the original object ID. Its content is a partial reconstruction, not the original source.
+                      </p>
+                      <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-background p-2 text-[10px] text-muted-foreground">
+                        {recoveryPreview.draft.content.slice(0, 1600)}
+                        {recoveryPreview.draft.content.length > 1600 ? "\n…" : ""}
+                      </pre>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleRecoverSource}
+                          disabled={recoveryBusy}
+                          data-testid="confirm-source-recovery-btn"
+                          className="inline-flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-40"
+                        >
+                          {recoveryBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                          {recoveryBusy ? "Recovering…" : "Create locked recovery object"}
+                        </button>
+                        <button
+                          onClick={() => setRecoveryPreview(null)}
+                          disabled={recoveryBusy}
+                          className="rounded border border-border px-3 py-1.5 text-xs text-ink disabled:opacity-40"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {integrityAudit.orphanDerivedIndexes.count > 0 && !integrityRepairConfirm && (
+                    <button
+                      onClick={() => setIntegrityRepairConfirm(true)}
+                      disabled={integrityRepairBusy}
+                      data-testid="repair-orphan-indexes-btn"
+                      className="inline-flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-40"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Remove orphan derived indexes
+                    </button>
+                  )}
+
+                  {integrityRepairConfirm && (
+                    <div className="rounded border border-destructive/30 bg-destructive/5 p-2 space-y-2">
+                      <p className="text-[11px] text-ink">
+                        Remove derived index rows for object IDs that no longer exist? Source and immutable memory records remain untouched.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleIntegrityRepair}
+                          disabled={integrityRepairBusy}
+                          data-testid="confirm-repair-orphan-indexes-btn"
+                          className="inline-flex items-center gap-2 rounded bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground disabled:opacity-40"
+                        >
+                          {integrityRepairBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                          {integrityRepairBusy ? "Repairing…" : "Confirm repair"}
+                        </button>
+                        <button
+                          onClick={() => setIntegrityRepairConfirm(false)}
+                          disabled={integrityRepairBusy}
+                          className="rounded border border-border px-3 py-1.5 text-xs text-ink disabled:opacity-40"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             {maintenance && (
               <div className="space-y-3" data-testid="storage-inventory">
