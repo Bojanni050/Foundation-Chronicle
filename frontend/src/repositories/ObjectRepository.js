@@ -53,9 +53,49 @@ export class ObjectRepository {
   async counts() { throw new Error("not implemented"); }
   async findByContentHash(_hash) { throw new Error("not implemented"); }
   async findByProviderConversationId(_id) { throw new Error("not implemented"); }
+  async mergeAll(_objects) { throw new Error("not implemented"); }
+  async replaceAll(_objects) { throw new Error("not implemented"); }
 }
 
 export class IndexedDBObjectRepository extends ObjectRepository {
+  _validateImported(objects) {
+    if (!Array.isArray(objects)) throw new Error("Imported objects must be an array");
+    const ids = new Set();
+    return objects.map((object) => {
+      if (!object || typeof object.id !== "string" || !object.id || ids.has(object.id)) {
+        throw new Error(`Invalid or duplicate object id: ${object?.id || "unknown"}`);
+      }
+      ids.add(object.id);
+      return {
+        ...object,
+        type: validateType(object.type),
+        tags: Array.isArray(object.tags) ? object.tags : [],
+        turns: Array.isArray(object.turns) ? object.turns : [],
+        attachments: Array.isArray(object.attachments) ? object.attachments : [],
+        links: Array.isArray(object.links) ? object.links : [],
+      };
+    });
+  }
+
+  async mergeAll(objects) {
+    const validated = this._validateImported(objects);
+    const db = await getDB();
+    const tx = db.transaction(OBJECT_STORE, "readwrite");
+    for (const object of validated) await tx.store.put(object);
+    await tx.done;
+    return validated.length;
+  }
+
+  async replaceAll(objects) {
+    const validated = this._validateImported(objects);
+    const db = await getDB();
+    const tx = db.transaction(OBJECT_STORE, "readwrite");
+    await tx.store.clear();
+    for (const object of validated) await tx.store.put(object);
+    await tx.done;
+    return validated.length;
+  }
+
   async create(data = {}) {
     const now = new Date().toISOString();
     const obj = {

@@ -14,10 +14,36 @@ const {
   transitionKnowledgeGap,
 } = require("../epistemicPolicy");
 const { prepareEpisodeInput } = require("../episodePolicy");
+const { buildMemoryExport } = require("../memoryExport");
+const { restoreMemory } = require("../memoryRestore");
 
 const router = express.Router();
 
 const EVIDENCE_DIRECTIONS = ["supporting", "contradicting", "contextualizing"];
+
+// GET /api/memory/export — portable PostgreSQL half of a Chronicle backup.
+// The frontend combines this with IndexedDB objects, custom types, and raw
+// attachment bytes before offering one versioned archive file.
+router.get("/export", async (_req, res, next) => {
+  try {
+    res.json(await buildMemoryExport(pool));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/memory/restore — merge one validated memory export transactionally.
+// Immutable episodes are never updated or deleted: identical observations are
+// reused by hash, while a genuine id collision aborts and rolls back everything.
+router.post("/restore", async (req, res, next) => {
+  try {
+    res.json(await restoreMemory(pool, req.body));
+  } catch (err) {
+    if (err instanceof TypeError) return res.status(400).json({ error: err.message });
+    if (/ conflict: /.test(err.message)) return res.status(409).json({ error: err.message });
+    return next(err);
+  }
+});
 
 async function createOrReuseEpisode(input) {
   const episode = prepareEpisodeInput(input);

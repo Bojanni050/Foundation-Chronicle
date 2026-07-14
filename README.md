@@ -62,6 +62,20 @@ To run the application, start both the Express API backend and the React fronten
 
 ## 🌟 Advanced Features
 
+### Complete local archive backup
+
+Settings → **Archive backup** exports one checksummed JSON file containing
+IndexedDB objects, custom object types, raw attachment bytes, and portable
+PostgreSQL memory data. Secrets (API keys/tokens, PIN data, usernames, local
+model paths) and rebuildable derived data (embeddings/search chunks) are never
+included.
+
+The same settings section validates and restores an archive. Restore is a
+non-destructive merge: extra local records remain, archived records win on the
+same stable ID, attachment bytes are checksum-verified, and PostgreSQL changes
+commit in one transaction. Immutable episodes are reused by observation hash
+and are never updated or deleted during restore.
+
 ### 🔐 Local Username & PIN Lock Screen
 * Secure your local workspace. On first launch, set up a username and choose a 4-to-6 digit security PIN code.
 * Interactive numpad with tactile hover effects, keyboard bind entries (`0-9` and `Backspace`), shake animation error handlers, and a "Lock Workspace" action in the sidebar.

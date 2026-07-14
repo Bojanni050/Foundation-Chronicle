@@ -2,6 +2,11 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { buildMemoryExport } = require("../server/memoryExport");
+const { restoreMemoryWithClient } = require("../server/memoryRestore");
 
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 
@@ -80,6 +85,18 @@ try {
     evidence_count: 3,
     hypothesis_count: 2,
   });
+
+  const memoryExport = await buildMemoryExport(client);
+  assert.equal(memoryExport.format, "foundation-chronicle-memory");
+  assert.ok(memoryExport.tables.episodes.some((row) => row.id === episodeId));
+  assert.ok(memoryExport.tables.evidence.some((row) => row.episode_id === episodeId));
+  assert.ok(
+    memoryExport.tables.knowledge.every((row) => !("embedding" in row)),
+    "portable memory export must not include derived embedding vectors",
+  );
+  const restoreResult = await restoreMemoryWithClient(client, memoryExport);
+  assert.ok(restoreResult.episodeReused >= 2, "restore must reuse immutable episodes by hash");
+  assert.equal(restoreResult.counts.evidence, memoryExport.tables.evidence.length);
 
   await client.query("SAVEPOINT duplicate_evidence");
   try {

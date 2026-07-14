@@ -31,6 +31,42 @@ function saveAttachment(buffer, filename, mimeType) {
   return meta;
 }
 
+// Restore keeps the archived id so repeated imports are idempotent and object
+// metadata never needs to be rewritten. A same-id/different-bytes collision is
+// rejected loudly instead of silently replacing a local file.
+function restoreAttachment(buffer, id, filename, mimeType) {
+  if (!ID_RE.test(id)) {
+    const error = new Error("invalid attachment id");
+    error.code = "INVALID_ATTACHMENT_ID";
+    throw error;
+  }
+  const existing = getAttachment(id);
+  if (existing) {
+    const existingBytes = fs.readFileSync(existing.filePath);
+    if (!existingBytes.equals(buffer)) {
+      const error = new Error(`attachment id conflict: ${id}`);
+      error.code = "ATTACHMENT_ID_CONFLICT";
+      throw error;
+    }
+    return { ...existing, reused: true };
+  }
+
+  ensureDir();
+  const dir = path.join(DATA_DIR, id);
+  fs.mkdirSync(dir);
+  const safeName = path.basename(filename || "file").replace(/[^\w.\-]+/g, "_") || "file";
+  fs.writeFileSync(path.join(dir, safeName), buffer);
+  const meta = {
+    id,
+    filename: safeName,
+    mimeType: mimeType || "application/octet-stream",
+    size: buffer.length,
+    createdAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(path.join(dir, "meta.json"), JSON.stringify(meta));
+  return { ...meta, reused: false };
+}
+
 // Always resolves the served file from meta.json's own recorded filename,
 // never from a caller-supplied path segment — the :filename in the GET
 // route is cosmetic (matches what saveAttachment returned, for a sane
@@ -51,4 +87,4 @@ function getAttachment(id) {
   return { ...meta, filePath };
 }
 
-module.exports = { saveAttachment, getAttachment };
+module.exports = { saveAttachment, restoreAttachment, getAttachment };

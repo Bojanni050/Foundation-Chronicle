@@ -40,6 +40,17 @@ export function listHypotheses(status) {
   return memoryRequest(`/hypotheses${query}`);
 }
 
+export function exportMemory() {
+  return memoryRequest("/export");
+}
+
+export function restoreMemory(memory) {
+  return memoryRequest("/restore", {
+    method: "POST",
+    body: JSON.stringify(memory),
+  });
+}
+
 export function getHypothesis(id) {
   return memoryRequest(`/hypotheses/${encodeURIComponent(id)}`);
 }

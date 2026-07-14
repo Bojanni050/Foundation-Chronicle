@@ -33,6 +33,35 @@ function save(list) {
   window.dispatchEvent(new Event("chronicle-types-changed"));
 }
 
+function validateCustomTypes(list) {
+  if (!Array.isArray(list)) throw new Error("Custom types must be an array");
+  const seen = new Set();
+  return list.map((type) => {
+    if (!type || typeof type.key !== "string" || !type.key || RESERVED.has(type.key) || seen.has(type.key)) {
+      throw new Error(`Invalid or duplicate custom type: ${type?.key || "unknown"}`);
+    }
+    seen.add(type.key);
+    return {
+      key: type.key,
+      label: String(type.label || type.key),
+      singular: String(type.singular || type.label || type.key),
+      iconName: String(type.iconName || "Shapes"),
+    };
+  });
+}
+
+export function setCustomTypes(list) {
+  const validated = validateCustomTypes(list);
+  save(validated);
+  return validated;
+}
+
+export function mergeCustomTypes(imported) {
+  const next = new Map(getCustomTypes().map((type) => [type.key, type]));
+  for (const type of validateCustomTypes(imported)) next.set(type.key, type);
+  return setCustomTypes([...next.values()]);
+}
+
 export function addCustomType(label, iconName) {
   const clean = (label || "").trim();
   if (!clean) throw new Error("Type name is required");

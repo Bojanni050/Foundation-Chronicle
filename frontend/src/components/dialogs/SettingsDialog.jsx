@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, Check, X, Copy, Eye, EyeOff, RefreshCw, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import { Archive, Upload, Loader2, Check, X, Copy, Eye, EyeOff, RefreshCw, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getSettings, saveSettings, AI_FUNCTIONS } from "@/lib/settings";
 import { AIService } from "@/services/AIService";
@@ -10,6 +10,12 @@ import { getDB, OBJECT_STORE } from "@/lib/db";
 import { invokeTauri } from "@/lib/tauri";
 import { startUiaCaptureListener, stopUiaCaptureListener } from "@/services/uiaCapture";
 import { relTime } from "@/lib/format";
+import {
+  buildChronicleBackup,
+  downloadChronicleBackup,
+  mergeChronicleBackup,
+  readChronicleBackupFile,
+} from "@/services/backupService";
 
 function Field({ label, children, hint }) {
   return (
@@ -40,6 +46,58 @@ export function SettingsDialog({ open, onOpenChange }) {
   const [activityObjects, setActivityObjects] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityDeletingId, setActivityDeletingId] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreCandidate, setRestoreCandidate] = useState(null);
+
+  const handleBackup = async () => {
+    setBackupBusy(true);
+    try {
+      const backup = await buildChronicleBackup();
+      downloadChronicleBackup(backup);
+      const counts = backup.manifest.counts;
+      toast.success(
+        `Backup created: ${counts.objects} objects, ${counts.attachments} attachments, ${counts.episodes} episodes`,
+      );
+    } catch (err) {
+      toast.error(`Backup failed: ${err.message}`);
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const handleRestoreFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setRestoreBusy(true);
+    setRestoreCandidate(null);
+    try {
+      const backup = await readChronicleBackupFile(file);
+      setRestoreCandidate({ backup, fileName: file.name });
+      toast.success("Backup validated. Review the summary before merging.");
+    } catch (err) {
+      toast.error(`Backup rejected: ${err.message}`);
+    } finally {
+      setRestoreBusy(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!restoreCandidate) return;
+    setRestoreBusy(true);
+    try {
+      const result = await mergeChronicleBackup(restoreCandidate.backup);
+      toast.success(
+        `Backup merged: ${result.objects} objects, ${result.attachments} attachments, ${result.counts.episodes} episodes`,
+      );
+      onOpenChange(false);
+      window.location.reload();
+    } catch (err) {
+      toast.error(`Restore failed: ${err.message}`);
+      setRestoreBusy(false);
+    }
+  };
 
   const handleSeed = async () => {
     setSeedBusy(true);
@@ -616,6 +674,67 @@ export function SettingsDialog({ open, onOpenChange }) {
                 className="w-full rounded-lg border border-border bg-card/50 px-3 py-2 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary/40"
               />
             </Field>
+          </section>
+
+          <div className="border-t border-border" />
+
+          <section className="space-y-4">
+            <h3 className="font-serif text-base text-ink">Archive backup</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Exports IndexedDB objects, custom types, raw attachment files, and PostgreSQL memory into one
+              checksummed JSON archive. API keys, PIN data, model paths, embeddings, and search indexes are excluded.
+            </p>
+            <button
+              onClick={handleBackup}
+              disabled={backupBusy}
+              data-testid="export-backup-btn"
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-ink hover:bg-accent disabled:opacity-40 transition-colors"
+            >
+              {backupBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4 text-primary" />}
+              {backupBusy ? "Building complete backup…" : "Export complete backup"}
+            </button>
+
+            <div className="rounded-lg border border-border bg-card/40 p-3 space-y-3">
+              <div>
+                <p className="text-sm font-medium text-ink">Restore from backup</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  First validates the archive and every attachment checksum. Restore is a non-destructive merge:
+                  existing extra records remain, matching IDs use the archived version, and immutable episodes are reused.
+                </p>
+              </div>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-ink hover:bg-accent transition-colors">
+                {restoreBusy && !restoreCandidate
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Upload className="h-4 w-4 text-primary" />}
+                {restoreBusy && !restoreCandidate ? "Validating backup…" : "Choose backup file"}
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={handleRestoreFile}
+                  disabled={restoreBusy}
+                  className="sr-only"
+                  data-testid="restore-backup-file"
+                />
+              </label>
+
+              {restoreCandidate && (
+                <div className="rounded-md border border-primary/25 bg-primary/5 p-3 space-y-2" data-testid="restore-backup-preview">
+                  <p className="break-all text-xs font-medium text-ink">{restoreCandidate.fileName}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Created {new Date(restoreCandidate.backup.manifest.createdAt).toLocaleString()} · {restoreCandidate.backup.manifest.counts.objects} objects · {restoreCandidate.backup.manifest.counts.attachments} attachments · {restoreCandidate.backup.manifest.counts.episodes} episodes
+                  </p>
+                  <button
+                    onClick={handleRestore}
+                    disabled={restoreBusy}
+                    data-testid="confirm-restore-backup-btn"
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/95 disabled:opacity-40 transition-colors"
+                  >
+                    {restoreBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {restoreBusy ? "Merging validated backup…" : "Merge validated backup"}
+                  </button>
+                </div>
+              )}
+            </div>
           </section>
 
           <div className="border-t border-border" />

@@ -5,7 +5,7 @@
 // keeping large binaries out of browser storage.
 const express = require("express");
 const { requireAuth } = require("../auth");
-const { saveAttachment, getAttachment } = require("../attachmentsStore");
+const { saveAttachment, restoreAttachment, getAttachment } = require("../attachmentsStore");
 
 const router = express.Router();
 
@@ -38,6 +38,41 @@ router.post("/", requireAuth, express.raw({ type: "*/*", limit: "25mb" }), (req,
     size: meta.size,
     url: `/api/attachments/${meta.id}/${encodeURIComponent(meta.filename)}`,
   });
+});
+
+// POST /api/attachments/restore/:id — idempotent archive restore. This uses
+// the same authenticated binary boundary as ordinary attachment ingestion.
+router.post("/restore/:id", requireAuth, express.raw({ type: "*/*", limit: "25mb" }), (req, res) => {
+  if (!Buffer.isBuffer(req.body) || !req.body.length) {
+    return res.status(400).json({ error: "empty body" });
+  }
+  const rawFilename = req.get("X-Attachment-Filename") || "file";
+  let filename;
+  try {
+    filename = decodeURIComponent(rawFilename);
+  } catch {
+    filename = rawFilename;
+  }
+  try {
+    const meta = restoreAttachment(
+      req.body,
+      req.params.id,
+      filename,
+      req.get("X-Attachment-Mime-Type") || "application/octet-stream",
+    );
+    res.status(meta.reused ? 200 : 201).json({
+      id: meta.id,
+      filename: meta.filename,
+      mimeType: meta.mimeType,
+      size: meta.size,
+      reused: meta.reused,
+      url: `/api/attachments/${meta.id}/${encodeURIComponent(meta.filename)}`,
+    });
+  } catch (err) {
+    if (err.code === "INVALID_ATTACHMENT_ID") return res.status(400).json({ error: err.message });
+    if (err.code === "ATTACHMENT_ID_CONFLICT") return res.status(409).json({ error: err.message });
+    throw err;
+  }
 });
 
 // GET /api/attachments/:id/:filename — no auth: this is what <img src> tags
