@@ -41,8 +41,8 @@ export function AIWeave({ selectedObject, allObjects, onOpen, onRefreshInbox, sy
     return () => { cancelled = true; };
   }, [selectedObject]);
 
-  // Same categorie-routing as ChatDialog's live consolidation and
-  // detectPersonaKenmerken()'s background scan — persona claims go through
+  // Same categorie-routing as detectPersonaKenmerken()'s background scan —
+  // persona claims go through
   // the trust-ladder pipeline, general facts/concepts become plain kennis
   // objects. On-demand only (a button, not automatic) — an LLM call every
   // time an entry is opened would be wasteful.
