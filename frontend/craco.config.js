@@ -66,6 +66,16 @@ if (config.enableHealthCheck) {
 }
 
 let webpackConfig = {
+  jest: {
+    configure: {
+      // Mirrors the webpack "@" alias below — without this, any test that
+      // imports a "@/..." path fails to resolve under CRA's jest runner
+      // even though the same import works fine in the app itself.
+      moduleNameMapper: {
+        "^@/(.*)$": "<rootDir>/src/$1",
+      },
+    },
+  },
   eslint: {
     configure: {
       extends: ["plugin:react-hooks/recommended"],

@@ -7,6 +7,7 @@ import { objectRepository } from "@/repositories";
 import { getSettings } from "@/lib/settings";
 import { pollInbox } from "@/services/inboxSync";
 import { runAutomaticPersonaMaintenance } from "@/services/personaSync";
+import { detectHypothesisCandidates } from "@/services/hypothesisSync";
 import { findRelatedLocal } from "@/services/weave";
 import { startUiaCaptureListener } from "@/services/uiaCapture";
 import { fetchSystemStatus } from "@/services/statusService";
@@ -109,6 +110,14 @@ export default function App() {
         if (detected > 0) parts.push(`${detected} new pattern${detected === 1 ? "" : "s"}`);
         if (reflected > 0) parts.push(`${reflected} temporal change${reflected === 1 ? "" : "s"}`);
         toast.success(`Persona updated: ${parts.join(", ")}`);
+      }
+      // Separate pipeline, own watermark (hypothesisProcessedAt) — see
+      // hypothesisSync.js. Runs in the same cycle as persona maintenance
+      // rather than its own timer so a single settings toggle/AI outage
+      // affects both the same way.
+      const hypothesesFound = await detectHypothesisCandidates();
+      if (hypothesesFound > 0) {
+        toast.success(`Memory updated: ${hypothesesFound} new hypothesis observation${hypothesesFound === 1 ? "" : "s"}`);
       }
     };
     const id = setInterval(run, 30 * 60 * 1000);

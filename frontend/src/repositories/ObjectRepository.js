@@ -137,6 +137,12 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       // to skip re-processing unchanged content (currently: persona
       // detection's full scan).
       processedAt: data.processedAt || null,
+      // Separate watermark for hypothesis/episode extraction (services/
+      // hypothesisSync.js). Deliberately its own field, not reusing
+      // processedAt: two independent pipelines racing on one shared
+      // watermark within the same maintenance cycle would have the first
+      // one to finish stamp it, leaving the second nothing left to scan.
+      hypothesisProcessedAt: data.hypothesisProcessedAt || null,
       locked: data.locked === true,
       createdAt: data.createdAt || now,
       updatedAt: now,

@@ -7,6 +7,7 @@ export const AI_FUNCTIONS = [
   { key: "weave", label: "AI Weave", hint: "Picks related objects from a candidate list — needs decent reasoning." },
   { key: "pulse", label: "AI Pulse", hint: "Writes a short digest of your stack — benefits from a more capable model." },
   { key: "persona", label: "Persona detection", hint: "Judges soort/gevoelig per kenmerk — needs careful, nuanced reasoning." },
+  { key: "hypothesis", label: "Hypothesis detection", hint: "Proposes testable hypotheses and evidence from your archive — needs careful, nuanced reasoning." },
 ];
 
 const DEFAULT_MODEL = "deepseek/deepseek-v4-flash";
@@ -31,6 +32,7 @@ const DEFAULTS = {
     weave: DEFAULT_MODEL,
     pulse: DEFAULT_MODEL,
     persona: DEFAULT_MODEL,
+    hypothesis: DEFAULT_MODEL,
   },
   apiUrl: "http://127.0.0.1:4577",
   apiToken: "",

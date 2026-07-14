@@ -91,10 +91,23 @@ export function getHypothesis(id) {
   return memoryRequest(`/hypotheses/${encodeURIComponent(id)}`);
 }
 
+// Accepts either a plain string (MemoryDialog's manual "New hypothesis"
+// input — text only, no criteria) or a full candidate object with
+// verification/confirmation/rejection criteria (hypothesisSync.js's
+// automatic extraction, which can state them concretely from the source).
 export function createHypothesis(hypothese) {
+  const body =
+    typeof hypothese === "string"
+      ? { hypothese }
+      : {
+          hypothese: hypothese.hypothese,
+          verificatieCriteria: hypothese.verificatieCriteria,
+          bevestigingsCriteria: hypothese.bevestigingsCriteria,
+          afwijzingsCriteria: hypothese.afwijzingsCriteria,
+        };
   return memoryRequest("/hypotheses", {
     method: "POST",
-    body: JSON.stringify({ hypothese }),
+    body: JSON.stringify(body),
   });
 }
 
