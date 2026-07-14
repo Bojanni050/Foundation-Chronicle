@@ -73,9 +73,9 @@ export function GaiaChat({ open, onClose }) {
     if (!input.trim() || isLoading) return;
 
     const userText = input.trim();
-    const nextMessages = [...messages, { role: 'user', text: userText }];
+    const history = messages.map(({ role, text }) => ({ role, text }));
     setInput('');
-    setMessages(nextMessages);
+    setMessages(prev => [...prev, { role: 'user', text: userText }]);
     setIsLoading(true);
 
     try {
@@ -84,7 +84,7 @@ export function GaiaChat({ open, onClose }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userText,
-          history: nextMessages.map(({ role, text }) => ({ role, text }))
+          history
         })
       });
 
