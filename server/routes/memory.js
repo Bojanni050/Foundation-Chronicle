@@ -75,6 +75,32 @@ router.get("/episodes/:id", async (req, res) => {
   res.json(rows[0]);
 });
 
+// GET /api/memory/sources/:bronObjectId/usage — read-only bridge across the
+// IndexedDB/PostgreSQL boundary. The frontend uses this before deleting an
+// object and to mark provenance links whose source object no longer exists.
+router.get("/sources/:bronObjectId/usage", async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT
+       ep.*,
+       COUNT(e.id)::int AS evidence_count,
+       ARRAY_REMOVE(ARRAY_AGG(DISTINCT e.hypothesis_id), NULL) AS hypothesis_ids
+     FROM episode ep
+     LEFT JOIN evidence e ON e.episode_id = ep.id
+     WHERE ep.bron_object_id = $1
+     GROUP BY ep.id
+     ORDER BY ep.captured_at ASC`,
+    [req.params.bronObjectId],
+  );
+  const hypothesisIds = new Set(rows.flatMap((row) => row.hypothesis_ids || []));
+  res.json({
+    bronObjectId: req.params.bronObjectId,
+    episodeCount: rows.length,
+    evidenceCount: rows.reduce((sum, row) => sum + row.evidence_count, 0),
+    hypothesisCount: hypothesisIds.size,
+    episodes: rows,
+  });
+});
+
 // GET /api/memory/hypotheses?status=open|confirmed|rejected
 router.get("/hypotheses", async (req, res) => {
   const { status } = req.query;

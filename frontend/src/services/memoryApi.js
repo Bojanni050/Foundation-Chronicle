@@ -58,6 +58,10 @@ export function createEpisode(episode) {
   });
 }
 
+export function getSourceUsage(bronObjectId) {
+  return memoryRequest(`/sources/${encodeURIComponent(bronObjectId)}/usage`);
+}
+
 export function linkEvidence(hypothesisId, episodeId, richting) {
   return memoryRequest(`/hypotheses/${encodeURIComponent(hypothesisId)}/evidence`, {
     method: "POST",

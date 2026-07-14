@@ -10,6 +10,7 @@ import { runAutomaticPersonaMaintenance } from "@/services/personaSync";
 import { findRelatedLocal } from "@/services/weave";
 import { startUiaCaptureListener } from "@/services/uiaCapture";
 import { fetchSystemStatus } from "@/services/statusService";
+import { getSourceUsage } from "@/services/memoryApi";
 import { invokeTauri } from "@/lib/tauri";
 import { Sidebar } from "@/components/Sidebar";
 import { ObjectList } from "@/components/ObjectList";
@@ -181,6 +182,23 @@ export default function App() {
   }, []);
 
   const onDelete = useCallback(async (id) => {
+    // Episodes are immutable PostgreSQL snapshots and intentionally survive
+    // deletion of their IndexedDB source. Warn when that distinction matters,
+    // but fail open if the optional memory layer is unavailable: deleting an
+    // archive object must never depend on the interpretative layer being up.
+    try {
+      const usage = await getSourceUsage(id);
+      if (usage.episodeCount > 0) {
+        const confirmed = window.confirm(
+          `This object is referenced by ${usage.episodeCount} immutable episode${usage.episodeCount === 1 ? "" : "s"} ` +
+          `across ${usage.hypothesisCount} hypothesis${usage.hypothesisCount === 1 ? "" : "es"}. ` +
+          "Deleting the object will not delete those frozen evidence snapshots. Continue?",
+        );
+        if (!confirmed) return;
+      }
+    } catch {
+      // Optional/read-only guard only; repository deletion remains available.
+    }
     try {
       await objectRepository.delete(id);
     } catch (err) {
@@ -333,6 +351,8 @@ export default function App() {
         open={dlg.memory}
         onOpenChange={(v) => setDlg((d) => ({ ...d, memory: v }))}
         selectedObject={selectedObject}
+        allObjects={allObjects}
+        onOpenObject={openObject}
       />
 
       {globalStatus && (globalStatus.backend !== 'ok' || globalStatus.db !== 'ok') && (

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Brain, CheckCircle2, Link2, Loader2, Plus, Quote, XCircle } from "lucide-react";
+import { AlertTriangle, Brain, CheckCircle2, ExternalLink, Link2, Loader2, Plus, Quote, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -26,7 +26,7 @@ function formatTime(value) {
   return Number.isNaN(date.getTime()) ? "time unknown" : date.toLocaleString();
 }
 
-export function MemoryDialog({ open, onOpenChange, selectedObject }) {
+export function MemoryDialog({ open, onOpenChange, selectedObject, allObjects = [], onOpenObject }) {
   const [hypotheses, setHypotheses] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -171,6 +171,12 @@ export function MemoryDialog({ open, onOpenChange, selectedObject }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const openSourceObject = (bronObjectId) => {
+    if (!allObjects.some((object) => object.id === bronObjectId)) return;
+    onOpenChange(false);
+    onOpenObject?.(bronObjectId);
   };
 
   return (
@@ -330,6 +336,19 @@ export function MemoryDialog({ open, onOpenChange, selectedObject }) {
                       <p className="mt-3 text-[10px] text-muted-foreground/70">
                         {item.episode?.bron_object_id} · captured {formatTime(item.episode?.captured_at)}
                       </p>
+                      {allObjects.some((object) => object.id === item.episode?.bron_object_id) ? (
+                        <button
+                          onClick={() => openSourceObject(item.episode.bron_object_id)}
+                          className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-ink hover:bg-accent"
+                          data-testid={`memory-open-source-${item.id}`}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" /> Open source object
+                        </button>
+                      ) : (
+                        <div className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700">
+                          <AlertTriangle className="h-3.5 w-3.5" /> Source object no longer exists
+                        </div>
+                      )}
                     </article>
                   ))}
                 </div>

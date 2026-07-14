@@ -53,6 +53,34 @@ try {
   );
   assert.equal(reuseRows[0].count, 2, "one episode must be reusable across hypotheses");
 
+  const { rows: secondEpisodeRows } = await client.query(
+    `INSERT INTO episode
+       (bron_object_id, bronsoort, fragment, source_type, extraction_confidence, observation_hash)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    ["obj_integration", "note", "second frozen observation", "explicit-input", 100, `test:${randomUUID()}`],
+  );
+  await client.query(
+    "INSERT INTO evidence (hypothesis_id, episode_id, richting) VALUES ($1, $2, 'contextualizing')",
+    [firstHypothesisId, secondEpisodeRows[0].id],
+  );
+
+  const { rows: usageRows } = await client.query(
+    `SELECT
+       COUNT(DISTINCT ep.id)::int AS episode_count,
+       COUNT(e.id)::int AS evidence_count,
+       COUNT(DISTINCT e.hypothesis_id)::int AS hypothesis_count
+     FROM episode ep
+     LEFT JOIN evidence e ON e.episode_id = ep.id
+     WHERE ep.bron_object_id = $1`,
+    ["obj_integration"],
+  );
+  assert.deepEqual(usageRows[0], {
+    episode_count: 2,
+    evidence_count: 3,
+    hypothesis_count: 2,
+  });
+
   await client.query("SAVEPOINT duplicate_evidence");
   try {
     await client.query(
