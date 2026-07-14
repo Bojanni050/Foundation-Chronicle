@@ -143,6 +143,16 @@ export class IndexedDBObjectRepository extends ObjectRepository {
       // watermark within the same maintenance cycle would have the first
       // one to finish stamp it, leaving the second nothing left to scan.
       hypothesisProcessedAt: data.hypothesisProcessedAt || null,
+      // Set once by services/contentDistributor.js's cheap triage pass —
+      // whether this object is worth persona detection's/hypothesis
+      // detection's own, much more expensive extraction call. Null/undefined
+      // (never triaged yet) is treated as "worth checking" by both
+      // pipelines; only an explicit `false` skips the expensive call, so a
+      // distributor outage or a not-yet-run first pass never silently loses
+      // content instead of just costing an extra scan.
+      personaRelevant: data.personaRelevant ?? null,
+      hypothesisRelevant: data.hypothesisRelevant ?? null,
+      distributedAt: data.distributedAt || null,
       locked: data.locked === true,
       createdAt: data.createdAt || now,
       updatedAt: now,

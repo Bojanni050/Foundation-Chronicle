@@ -15,6 +15,7 @@ const {
   transitionKnowledgeGap,
 } = require("../epistemicPolicy");
 const { prepareEpisodeInput } = require("../episodePolicy");
+const { embed } = require("../embedding");
 const { buildMemoryExport } = require("../memoryExport");
 const { restoreMemory, preflightMemoryRestore } = require("../memoryRestore");
 const {
@@ -221,6 +222,15 @@ router.get("/hypotheses", async (req, res) => {
 // same target; only the first one actually confirmed succeeds (see
 // /hypotheses/:id/confirm), so this is deliberately not exclusive at
 // creation time.
+//
+// Generates a local embedding and checks for an existing similar OPEN
+// hypothesis first (same >0.82 threshold as kenmerken.js) — both the manual
+// "New hypothesis" flow and the automatic extraction/reflection pipelines
+// funnel through this one route, so this is the single place a near-
+// duplicate hypothesis gets caught, regardless of where the candidate came
+// from. A match returns the EXISTING hypothesis instead of inserting a new
+// one; only confirmed/rejected hypotheses are excluded from matching — a
+// closed hypothesis is a settled matter, not something to keep reinforcing.
 router.post("/hypotheses", async (req, res) => {
   const { hypothese, verificatieCriteria, bevestigingsCriteria, afwijzingsCriteria, validFrom, validTo, temporalText, supersedesFactId } =
     req.body || {};
@@ -229,10 +239,37 @@ router.post("/hypotheses", async (req, res) => {
     const { rows: factRows } = await pool.query("SELECT id FROM fact WHERE id = $1", [supersedesFactId]);
     if (!factRows[0]) return res.status(404).json({ error: "supersedesFactId does not reference an existing fact" });
   }
+
+  let embeddingLiteral = null;
+  try {
+    embeddingLiteral = `[${(await embed(hypothese)).join(",")}]`;
+  } catch (err) {
+    console.error("local embedding failed, saving hypothesis without one:", err.message);
+  }
+
+  if (embeddingLiteral) {
+    try {
+      const { rows: matches } = await pool.query(
+        `SELECT *, 1 - (embedding <=> $1) AS similarity
+         FROM hypothesis
+         WHERE embedding IS NOT NULL AND status = 'open'
+         ORDER BY embedding <=> $1
+         LIMIT 1`,
+        [embeddingLiteral]
+      );
+      const bestMatch = matches[0];
+      if (bestMatch && bestMatch.similarity > 0.82) {
+        return res.status(200).json({ ...bestMatch, matched: true });
+      }
+    } catch (err) {
+      console.error("Server-side hypothesis duplicate detection failed:", err.message);
+    }
+  }
+
   const { rows } = await pool.query(
     `INSERT INTO hypothesis
-       (hypothese, verificatie_criteria, bevestigings_criteria, afwijzings_criteria, valid_from, valid_to, temporal_text, supersedes_fact_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+       (hypothese, verificatie_criteria, bevestigings_criteria, afwijzings_criteria, valid_from, valid_to, temporal_text, supersedes_fact_id, embedding)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
     [
       hypothese,
       verificatieCriteria || null,
@@ -242,9 +279,27 @@ router.post("/hypotheses", async (req, res) => {
       validTo || null,
       temporalText || null,
       supersedesFactId || null,
+      embeddingLiteral,
     ]
   );
-  res.status(201).json(rows[0]);
+  res.status(201).json({ ...rows[0], matched: false });
+});
+
+// GET /api/memory/hypotheses/:id/vergelijkbaar — nearest open hypotheses by
+// embedding similarity, same shape as kenmerken.js's own /vergelijkbaar.
+router.get("/hypotheses/:id/vergelijkbaar", async (req, res) => {
+  const { rows: cur } = await pool.query("SELECT embedding FROM hypothesis WHERE id = $1", [req.params.id]);
+  if (!cur[0]) return res.status(404).json({ error: "not found" });
+  if (!cur[0].embedding) return res.status(409).json({ error: "hypothesis has no embedding yet" });
+  const { rows } = await pool.query(
+    `SELECT id, hypothese, status, 1 - (embedding <=> $1) AS gelijkenis
+     FROM hypothesis
+     WHERE id != $2 AND embedding IS NOT NULL
+     ORDER BY embedding <=> $1
+     LIMIT 5`,
+    [cur[0].embedding, req.params.id]
+  );
+  res.json(rows);
 });
 
 // GET /api/memory/hypotheses/:id — detail + evidence + the current

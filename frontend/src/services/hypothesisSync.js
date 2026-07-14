@@ -68,7 +68,16 @@ export async function detectHypothesisCandidates(limit = 30) {
 
     if (!objectsToProcess.length) return 0;
 
-    const candidates = await AIService.suggestHypothesisCandidates(openHypotheses, objectsToProcess);
+    // services/contentDistributor.js's cheap triage pass already tagged most
+    // of these — skip the expensive extraction call for anything explicitly
+    // tagged irrelevant. Never triaged yet (null/undefined) still goes
+    // through, so a distributor outage or a not-yet-run first pass costs an
+    // extra scan rather than silently losing content.
+    const relevantObjects = objectsToProcess.filter((o) => o.hypothesisRelevant !== false);
+
+    const candidates = relevantObjects.length
+      ? await AIService.suggestHypothesisCandidates(openHypotheses, relevantObjects)
+      : [];
     const openById = new Map(openHypotheses.map((h) => [h.id, h]));
 
     let processed = 0;

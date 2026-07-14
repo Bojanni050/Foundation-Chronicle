@@ -127,6 +127,13 @@
       "when": 1784055166176,
       "tag": "0017_shocking_marvel_zombies",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784056202650,
+      "tag": "0018_demonic_tarantula",
+      "breakpoints": true
     }
   ]
 }

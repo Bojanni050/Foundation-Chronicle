@@ -9,6 +9,7 @@ import { pollInbox } from "@/services/inboxSync";
 import { runAutomaticPersonaMaintenance } from "@/services/personaSync";
 import { detectHypothesisCandidates } from "@/services/hypothesisSync";
 import { reflectOnHypotheses } from "@/services/hypothesisReflectionSync";
+import { runDistributor } from "@/services/contentDistributor";
 import { findRelatedLocal } from "@/services/weave";
 import { startUiaCaptureListener } from "@/services/uiaCapture";
 import { fetchSystemStatus } from "@/services/statusService";
@@ -105,6 +106,12 @@ export default function App() {
   // without re-running often enough to matter when nothing's changed.
   useEffect(() => {
     const run = async () => {
+      // Runs first: tags personaRelevant/hypothesisRelevant on new/changed
+      // objects with one cheap classification call, so the two heavier
+      // extraction passes below skip content already ruled out instead of
+      // each independently re-deciding relevance via their own full scan.
+      await runDistributor();
+
       const { detected, reflected } = await runAutomaticPersonaMaintenance();
       if (detected > 0 || reflected > 0) {
         const parts = [];

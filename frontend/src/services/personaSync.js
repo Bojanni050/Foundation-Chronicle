@@ -180,10 +180,19 @@ export async function detectPersonaKenmerken(limit = 30) {
 
     if (!objectsToProcess.length) return 0;
 
+    // services/contentDistributor.js's cheap triage pass already tagged most
+    // of these — skip the expensive extraction call for anything explicitly
+    // tagged irrelevant. Never triaged yet (null/undefined) still goes
+    // through, so a distributor outage or a not-yet-run first pass costs an
+    // extra scan rather than silently losing content.
+    const relevantObjects = objectsToProcess.filter((o) => o.personaRelevant !== false);
+
     // Pass the top 20 recently rejected traits as negative feedback to LLM
     const recentRejected = rejected.slice(0, 20);
 
-    const candidates = await AIService.suggestPersonaKenmerken(recentRejected, objectsToProcess);
+    const candidates = relevantObjects.length
+      ? await AIService.suggestPersonaKenmerken(recentRejected, relevantObjects)
+      : [];
     let processed = 0;
     for (const c of candidates) {
       if (!c?.kenmerk || !c?.bronObjectId) continue;

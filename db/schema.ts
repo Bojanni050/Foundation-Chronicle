@@ -263,6 +263,12 @@ export const hypothesis = pgTable("hypothesis", {
   // fact at confirmation — see fact.supersedesFactId below for why this
   // can't simply be computed later by mutating the old fact.
   supersedesFactId: uuid("supersedes_fact_id").references(() => fact.id, { onDelete: "restrict" }),
+  // Local Qwen3-Embedding-0.6B (server/embedding.js), same model and
+  // dimension as persona_kenmerk — lets POST /hypotheses check for an
+  // existing similar OPEN hypothesis before creating a near-duplicate.
+  // Nullable: a hypothesis still saves even if local embedding generation
+  // fails, same graceful-fallback philosophy as the rest of Chronicle.
+  embedding: vector("embedding", { dimensions: 1024 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
