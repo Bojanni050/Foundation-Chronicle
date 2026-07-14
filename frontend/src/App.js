@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@/App.css";
 import { Toaster, toast } from "sonner";
-import { PanelRightOpen } from "lucide-react";
+import { PanelRightOpen, Globe } from "lucide-react";
 import { LoginScreen } from "@/components/LoginScreen";
 import { objectRepository } from "@/repositories";
 import { getSettings } from "@/lib/settings";
@@ -31,6 +31,7 @@ import { EngineDialog } from "@/components/dialogs/EngineDialog";
 import { DedupDialog } from "@/components/dialogs/DedupDialog";
 import { CaptureLogDialog } from "@/components/dialogs/CaptureLogDialog";
 import { MemoryDialog } from "@/components/dialogs/MemoryDialog";
+import { GaiaChat } from "@/components/GaiaChat";
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -43,6 +44,7 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [weaveOpen, setWeaveOpen] = useState(false);
   const [pulseBusy, setPulseBusy] = useState(false);
+  const [gaiaOpen, setGaiaOpen] = useState(false);
 
   const [dlg, setDlg] = useState({ search: false, import: false, settings: false, pulse: false, persona: false, graph: false, addType: false, engine: false, dedup: false, captureLog: false, memory: false });
   const [globalStatus, setGlobalStatus] = useState(null);
@@ -290,7 +292,7 @@ export default function App() {
         onNew={listNew}
       />
 
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-hidden relative">
         {selectedObject ? (
           <ObjectDetail
             key={selectedObject.id}
@@ -303,6 +305,20 @@ export default function App() {
         ) : (
           <WelcomeEmpty />
         )}
+        
+        {/* Gaia Trigger (Groene Aardbol) op de rechterlijn van deze tweede kolom */}
+        <div 
+          className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-50 cursor-pointer hover:scale-110 transition-transform flex items-center justify-center animate-pulse"
+          onClick={() => setGaiaOpen(!gaiaOpen)}
+          title="Chat met Gaia"
+        >
+          <div className="bg-background rounded-full p-0.5 shadow-md border border-border">
+            <Globe className="w-5 h-5 text-green-500" />
+          </div>
+        </div>
+        
+        {/* Render de Gaia Chat component, verplaatsbaar */}
+        <GaiaChat open={gaiaOpen} onClose={() => setGaiaOpen(false)} />
       </main>
 
       {weaveOpen ? (

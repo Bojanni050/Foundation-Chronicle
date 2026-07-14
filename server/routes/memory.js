@@ -294,6 +294,10 @@ router.get("/sources/:bronObjectId/usage", async (req, res) => {
 });
 
 // GET /api/memory/hypotheses?status=open|confirmed|rejected
+// Open hypotheses each carry their verdict (same read-only computation as
+// GET /hypotheses/:id) so a list view can sort/triage by evidentiary state
+// without an extra round-trip per row. confirmed/rejected rows skip this —
+// there's no "should I confirm this" question left to help answer.
 router.get("/hypotheses", async (req, res) => {
   const { status } = req.query;
   const query =
@@ -301,7 +305,20 @@ router.get("/hypotheses", async (req, res) => {
       ? { text: "SELECT * FROM hypothesis WHERE status = $1 ORDER BY created_at DESC", values: [status] }
       : { text: "SELECT * FROM hypothesis ORDER BY created_at DESC", values: [] };
   const { rows } = await pool.query(query.text, query.values);
-  res.json(rows);
+
+  const withVerdicts = await Promise.all(
+    rows.map(async (hyp) => {
+      if (hyp.status !== "open") return hyp;
+      const { rows: evidenceRows } = await pool.query(
+        `SELECT e.*, to_jsonb(ep) AS episode
+         FROM evidence e JOIN episode ep ON ep.id = e.episode_id
+         WHERE e.hypothesis_id = $1`,
+        [hyp.id]
+      );
+      return { ...hyp, verdict: isVerified(evidenceRows) };
+    })
+  );
+  res.json(withVerdicts);
 });
 
 // POST /api/memory/hypotheses
@@ -458,6 +475,64 @@ router.post("/hypotheses/:id/evidence", async (req, res, next) => {
   }
 });
 
+// Shared core of PATCH /hypotheses/:id/confirm — factored out so the bulk
+// route below can confirm several hypotheses without duplicating the
+// transaction/race-handling logic. Throws an Error with a `.status` (HTTP
+// status to report) on any expected failure; an unexpected error propagates
+// with no `.status`, same as it would from the single-item route.
+async function confirmHypothesisById(id) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // FOR UPDATE: two concurrent confirms on the same hypothesis must not
+    // both pass the "status is open" check before either writes.
+    const { rows } = await client.query("SELECT * FROM hypothesis WHERE id = $1 FOR UPDATE", [id]);
+    const hyp = rows[0];
+    if (!hyp) {
+      await client.query("ROLLBACK");
+      throw Object.assign(new Error("not found"), { status: 404 });
+    }
+    let patch;
+    try {
+      patch = confirmHypothesis(hyp);
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw Object.assign(new Error(err.message), { status: 409 });
+    }
+    const { rows: updated } = await client.query(
+      "UPDATE hypothesis SET status = $1, confirmed_at = $2 WHERE id = $3 RETURNING *",
+      [patch.status, patch.confirmedAt, id]
+    );
+    const newFact = buildFactFromHypothesis(hyp);
+    let factRows;
+    try {
+      ({ rows: factRows } = await client.query(
+        `INSERT INTO fact (inhoud, hypothesis_id, valid_from, valid_to, temporal_text, supersedes_fact_id)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [newFact.inhoud, id, newFact.validFrom, newFact.validTo, newFact.temporalText, newFact.supersedesFactId]
+      ));
+    } catch (err) {
+      // A competing hypothesis already superseded the same fact first — this
+      // confirmation loses the race. Roll back so the hypothesis itself
+      // reverts to "open" rather than ending up confirmed with no fact to
+      // show for it. Any other error propagates uncaught, same as it would
+      // from the single-item route.
+      if (err.code === "23505" && /fact_supersedes_fact_id_unique/.test(err.message)) {
+        await client.query("ROLLBACK");
+        throw Object.assign(new Error("the fact this hypothesis would supersede has already been superseded"), { status: 409 });
+      }
+      throw err;
+    }
+    await client.query("COMMIT");
+    return { ...updated[0], fact: factRows[0] };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // PATCH /api/memory/hypotheses/:id/confirm — the one explicit "a human
 // confirmed this" action. Deliberately ignores the current verdict: a human
 // can confirm a not-yet-"verified" hypothesis (their call, their evidence
@@ -469,75 +544,80 @@ router.post("/hypotheses/:id/evidence", async (req, res, next) => {
 // a hypothesis can never end up "confirmed" without the fact that makes that
 // confirmation legible as a first-class object, or vice versa.
 router.patch("/hypotheses/:id/confirm", async (req, res, next) => {
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    // FOR UPDATE: two concurrent confirms on the same hypothesis must not
-    // both pass the "status is open" check before either writes.
-    const { rows } = await client.query("SELECT * FROM hypothesis WHERE id = $1 FOR UPDATE", [req.params.id]);
-    const hyp = rows[0];
-    if (!hyp) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "not found" });
-    }
-    let patch;
-    try {
-      patch = confirmHypothesis(hyp);
-    } catch (err) {
-      await client.query("ROLLBACK");
-      return res.status(409).json({ error: err.message });
-    }
-    const { rows: updated } = await client.query(
-      "UPDATE hypothesis SET status = $1, confirmed_at = $2 WHERE id = $3 RETURNING *",
-      [patch.status, patch.confirmedAt, req.params.id]
-    );
-    const newFact = buildFactFromHypothesis(hyp);
-    let factRows;
-    try {
-      ({ rows: factRows } = await client.query(
-        `INSERT INTO fact (inhoud, hypothesis_id, valid_from, valid_to, temporal_text, supersedes_fact_id)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [newFact.inhoud, req.params.id, newFact.validFrom, newFact.validTo, newFact.temporalText, newFact.supersedesFactId]
-      ));
-    } catch (err) {
-      // A competing hypothesis already superseded the same fact first — this
-      // confirmation loses the race. Roll back so the hypothesis itself
-      // reverts to "open" rather than ending up confirmed with no fact to
-      // show for it. Any other error is left uncaught here and handled by
-      // the outer catch below, same as every other failure in this route.
-      if (err.code === "23505" && /fact_supersedes_fact_id_unique/.test(err.message)) {
-        await client.query("ROLLBACK");
-        return res.status(409).json({ error: "the fact this hypothesis would supersede has already been superseded" });
-      }
-      throw err;
-    }
-    await client.query("COMMIT");
-    res.json({ ...updated[0], fact: factRows[0] });
+    res.json(await confirmHypothesisById(req.params.id));
   } catch (err) {
-    await client.query("ROLLBACK");
+    if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
-  } finally {
-    client.release();
   }
 });
 
-// PATCH /api/memory/hypotheses/:id/reject  { reden: string }
-router.patch("/hypotheses/:id/reject", async (req, res) => {
-  const { reden } = req.body || {};
-  const { rows } = await pool.query("SELECT * FROM hypothesis WHERE id = $1", [req.params.id]);
+// Shared core of PATCH /hypotheses/:id/reject — see confirmHypothesisById
+// above for why this is factored out (the bulk route below).
+async function rejectHypothesisById(id, reden) {
+  const { rows } = await pool.query("SELECT * FROM hypothesis WHERE id = $1", [id]);
   const hyp = rows[0];
-  if (!hyp) return res.status(404).json({ error: "not found" });
+  if (!hyp) throw Object.assign(new Error("not found"), { status: 404 });
   let patch;
   try {
     patch = rejectHypothesis(hyp, { reden });
   } catch (err) {
-    return res.status(err.message === "rejectHypothesis: reden required" ? 400 : 409).json({ error: err.message });
+    const status = err.message === "rejectHypothesis: reden required" ? 400 : 409;
+    throw Object.assign(new Error(err.message), { status });
   }
   const { rows: updated } = await pool.query(
     "UPDATE hypothesis SET status = $1, rejected_at = $2, verwerp_reden = $3 WHERE id = $4 RETURNING *",
-    [patch.status, patch.rejectedAt, patch.verwerpReden, req.params.id]
+    [patch.status, patch.rejectedAt, patch.verwerpReden, id]
   );
-  res.json(updated[0]);
+  return updated[0];
+}
+
+// PATCH /api/memory/hypotheses/:id/reject  { reden: string }
+router.patch("/hypotheses/:id/reject", async (req, res, next) => {
+  try {
+    res.json(await rejectHypothesisById(req.params.id, req.body?.reden));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// PATCH /api/memory/hypotheses/bulk-confirm  { ids: string[] }
+// Confirms each id independently — one id failing (already confirmed, lost
+// a supersession race, ...) never blocks the rest. Still exactly as
+// "explicit human action" as confirming one at a time: the human reviewed
+// and selected every id in this list before this call was ever made: this
+// route only saves them the repeated clicks, it doesn't relax the rule.
+router.patch("/hypotheses/bulk-confirm", async (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids (non-empty array) required" });
+  const results = [];
+  for (const id of ids) {
+    try {
+      results.push({ id, success: true, ...(await confirmHypothesisById(id)) });
+    } catch (err) {
+      results.push({ id, success: false, error: err.message });
+    }
+  }
+  res.json({ results });
+});
+
+// PATCH /api/memory/hypotheses/bulk-reject  { ids: string[], reden: string }
+// One shared reason for the whole batch — a human rejecting several at once
+// typically has one reason ("all duplicates of an existing confirmed fact"),
+// not a bespoke one per item.
+router.patch("/hypotheses/bulk-reject", async (req, res) => {
+  const { ids, reden } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids (non-empty array) required" });
+  const results = [];
+  for (const id of ids) {
+    try {
+      results.push({ id, success: true, hypothesis: await rejectHypothesisById(id, reden) });
+    } catch (err) {
+      results.push({ id, success: false, error: err.message });
+    }
+  }
+  res.json({ results });
 });
 
 // GET /api/memory/knowledge-gaps?status=...

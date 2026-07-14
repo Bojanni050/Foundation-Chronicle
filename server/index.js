@@ -90,6 +90,40 @@ async function proxyToMemory(req, res) {
   }
 }
 
+async function proxyToHermes(req, res) {
+  const path = req.originalUrl.replace(/^\/api\/agent/, "");
+  const target = `http://127.0.0.1:4579${path}`;
+  try {
+    const headers = { ...req.headers };
+    delete headers.host;
+    delete headers["content-length"];
+    delete headers.expect;
+    delete headers.connection;
+    delete headers["transfer-encoding"];
+
+    const init = { method: req.method, headers };
+    if (!["GET", "HEAD"].includes(req.method)) {
+      init.body = JSON.stringify(req.body ?? {});
+    }
+
+    const upstream = await fetch(target, init);
+    res.status(upstream.status);
+    upstream.headers.forEach((value, key) => {
+      if (key.toLowerCase() === "content-encoding") return;
+      res.setHeader(key, value);
+    });
+
+    if (upstream.body) {
+      Readable.fromWeb(upstream.body).pipe(res);
+    } else {
+      res.end();
+    }
+  } catch (err) {
+    console.error("[proxyToHermes] failed:", req.method, req.originalUrl, err.message);
+    res.status(503).json({ error: "Hermes agent is unreachable.", detail: err.message });
+  }
+}
+
 const app = express();
 app.use(
   cors({
@@ -123,6 +157,8 @@ app.use("/api/settings/capture-activity", proxyToMemory);
 app.use("/api/persona", proxyToMemory);
 app.use("/api/memory", proxyToMemory);
 app.post("/api/objects/:objectId/embed", proxyToMemory);
+
+app.use("/api/agent", proxyToHermes);
 
 app.use("/api/settings", settingsRouter);
 app.use("/api/settings/chatgpt-import", chatgptImportRouter);
@@ -193,6 +229,9 @@ app.delete("/api/inbox", (_req, res) => {
 let memoryProcess = null;
 let stoppingMemoryIntentionally = false;
 
+let hermesProcess = null;
+let stoppingHermesIntentionally = false;
+
 function startMemoryProcess() {
   memoryProcess = spawn(
     process.execPath,
@@ -215,7 +254,35 @@ function startMemoryProcess() {
   });
 }
 
+function startHermesProcess() {
+  // Run Hermes via uv from the memory directory
+  hermesProcess = spawn(
+    "uv",
+    ["run", "python", "gaia_server.py"],
+    { 
+      cwd: path.join(__dirname, "..", "memory"),
+      stdio: "inherit", 
+      env: process.env 
+    }
+  );
+
+  hermesProcess.on("exit", (code, signal) => {
+    console.log(`[Gaia] Hermes agent exited (code=${code}, signal=${signal})`);
+    hermesProcess = null;
+    if (!stoppingHermesIntentionally) {
+      console.log("[Gaia] Hermes agent exited unexpectedly — restarting in 3s...");
+      setTimeout(startHermesProcess, 3000);
+    }
+  });
+
+  hermesProcess.on("error", (err) => {
+    console.error("[Gaia] Failed to start Hermes agent:", err.message);
+    hermesProcess = null;
+  });
+}
+
 startMemoryProcess();
+startHermesProcess();
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`\n  Chronicle local API running at http://${HOST}:${PORT}`);
@@ -224,8 +291,10 @@ const server = app.listen(PORT, HOST, () => {
 });
 
 function shutdown() {
-  console.log("\n  Shutting down Chronicle...");
+  console.log("\n  Shutting down Chronicle and subprocesses...");
   stoppingMemoryIntentionally = true;
+  stoppingHermesIntentionally = true;
+
   if (memoryProcess) {
     if (process.platform === "win32") {
       spawn("taskkill", ["/pid", memoryProcess.pid, "/f", "/t"]);
@@ -233,6 +302,15 @@ function shutdown() {
       memoryProcess.kill("SIGTERM");
     }
   }
+
+  if (hermesProcess) {
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", hermesProcess.pid, "/f", "/t"]);
+    } else {
+      hermesProcess.kill("SIGTERM");
+    }
+  }
+
   server.close(() => process.exit(0));
 }
 

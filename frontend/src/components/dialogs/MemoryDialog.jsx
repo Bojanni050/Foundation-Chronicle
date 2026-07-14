@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Brain, CheckCircle2, ExternalLink, Link2, Loader2, Plus, Quote, XCircle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Brain, CheckCircle2, ExternalLink, Link2, Loader2, Plus, Quote, ShieldCheck, ShieldQuestion, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
+  bulkConfirmHypotheses,
+  bulkRejectHypotheses,
   confirmHypothesis,
   createEpisode,
   createHypothesis,
@@ -11,6 +13,24 @@ import {
   listHypotheses,
   rejectHypothesis,
 } from "@/services/memoryApi";
+
+// Open+verified first (best triage candidates), then open+contested, then
+// plain open, then settled (confirmed/rejected) — newest first within each
+// group. Purely a display order; never changes anything about the data.
+function triagePriority(hypothesis) {
+  if (hypothesis.status !== "open") return 3;
+  if (hypothesis.verdict?.verified) return 0;
+  if (hypothesis.verdict?.contested) return 1;
+  return 2;
+}
+
+function sortForTriage(hypotheses) {
+  return [...hypotheses].sort((a, b) => {
+    const priorityDiff = triagePriority(a) - triagePriority(b);
+    if (priorityDiff !== 0) return priorityDiff;
+    return (b.created_at || "").localeCompare(a.created_at || "");
+  });
+}
 
 function sourceTypeForObject(object) {
   if (!object) return "explicit-input";
@@ -39,6 +59,7 @@ export function MemoryDialog({ open, onOpenChange, selectedObject, allObjects = 
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [bulkSelected, setBulkSelected] = useState(() => new Set());
 
   const loadHypotheses = useCallback(async (preferId) => {
     setLoading(true);
@@ -173,6 +194,68 @@ export function MemoryDialog({ open, onOpenChange, selectedObject, allObjects = 
     }
   };
 
+  const sortedHypotheses = useMemo(() => sortForTriage(hypotheses), [hypotheses]);
+  const openHypotheses = useMemo(() => sortedHypotheses.filter((h) => h.status === "open"), [sortedHypotheses]);
+
+  const toggleBulkSelect = (id) => {
+    setBulkSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllVerified = () => {
+    setBulkSelected(new Set(openHypotheses.filter((h) => h.verdict?.verified).map((h) => h.id)));
+  };
+
+  const clearBulkSelection = () => setBulkSelected(new Set());
+
+  const handleBulkConfirm = async () => {
+    if (!bulkSelected.size) return;
+    setBusy(true);
+    try {
+      const { results } = await bulkConfirmHypotheses([...bulkSelected]);
+      const succeeded = results.filter((r) => r.success).length;
+      const failed = results.length - succeeded;
+      toast[failed ? "warning" : "success"](
+        failed ? `Confirmed ${succeeded}, ${failed} failed (see console)` : `Confirmed ${succeeded} hypothes${succeeded === 1 ? "is" : "es"}`
+      );
+      if (failed) console.error("Bulk confirm failures:", results.filter((r) => !r.success));
+      clearBulkSelection();
+      await loadHypotheses(selectedId);
+      await loadDetail(selectedId);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleBulkReject = async () => {
+    if (!bulkSelected.size) return;
+    const reden = window.prompt(`Why are these ${bulkSelected.size} hypotheses rejected?`);
+    if (!reden?.trim()) return;
+    setBusy(true);
+    try {
+      const { results } = await bulkRejectHypotheses([...bulkSelected], reden.trim());
+      const succeeded = results.filter((r) => r.success).length;
+      const failed = results.length - succeeded;
+      toast[failed ? "warning" : "success"](
+        failed ? `Rejected ${succeeded}, ${failed} failed (see console)` : `Rejected ${succeeded} hypothes${succeeded === 1 ? "is" : "es"}`
+      );
+      if (failed) console.error("Bulk reject failures:", results.filter((r) => !r.success));
+      clearBulkSelection();
+      await loadHypotheses(selectedId);
+      await loadDetail(selectedId);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const openSourceObject = (bronObjectId) => {
     if (!allObjects.some((object) => object.id === bronObjectId)) return;
     onOpenChange(false);
@@ -215,20 +298,73 @@ export function MemoryDialog({ open, onOpenChange, selectedObject, allObjects = 
               </button>
             </div>
 
+            {openHypotheses.some((h) => h.verdict?.verified) && (
+              <div className="mt-3 flex items-center gap-1.5">
+                <button
+                  onClick={selectAllVerified}
+                  disabled={busy}
+                  className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+                  data-testid="memory-select-all-verified"
+                >
+                  Select all verified
+                </button>
+              </div>
+            )}
+
+            {bulkSelected.size > 0 && (
+              <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-accent/40 p-1.5">
+                <span className="px-1 text-[11px] text-muted-foreground">{bulkSelected.size} selected</span>
+                <button
+                  onClick={handleBulkConfirm}
+                  disabled={busy}
+                  className="ml-auto rounded-lg bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-40"
+                  data-testid="memory-bulk-confirm"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={handleBulkReject}
+                  disabled={busy}
+                  className="rounded-lg border border-destructive/40 px-2 py-1 text-[11px] text-destructive disabled:opacity-40"
+                  data-testid="memory-bulk-reject"
+                >
+                  Reject
+                </button>
+                <button onClick={clearBulkSelection} disabled={busy} className="rounded-lg px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent">
+                  Clear
+                </button>
+              </div>
+            )}
+
             <div className="mt-3 min-h-0 flex-1 overflow-y-auto space-y-1">
               {loading ? (
                 <Loader2 className="mx-auto mt-6 h-5 w-5 animate-spin text-muted-foreground" />
-              ) : hypotheses.length === 0 ? (
+              ) : sortedHypotheses.length === 0 ? (
                 <p className="p-3 text-xs text-muted-foreground">Create the first hypothesis.</p>
-              ) : hypotheses.map((hypothesis) => (
-                <button
+              ) : sortedHypotheses.map((hypothesis) => (
+                <div
                   key={hypothesis.id}
-                  onClick={() => setSelectedId(hypothesis.id)}
-                  className={`w-full rounded-lg px-3 py-2 text-left ${selectedId === hypothesis.id ? "bg-accent" : "hover:bg-accent/50"}`}
+                  className={`flex items-start gap-2 rounded-lg px-2 py-2 ${selectedId === hypothesis.id ? "bg-accent" : "hover:bg-accent/50"}`}
                 >
-                  <p className="line-clamp-2 text-sm text-ink">{hypothesis.hypothese}</p>
-                  <p className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">{hypothesis.status}</p>
-                </button>
+                  {hypothesis.status === "open" && (
+                    <input
+                      type="checkbox"
+                      checked={bulkSelected.has(hypothesis.id)}
+                      onChange={() => toggleBulkSelect(hypothesis.id)}
+                      onClick={(event) => event.stopPropagation()}
+                      className="mt-1.5 shrink-0"
+                      data-testid={`memory-bulk-select-${hypothesis.id}`}
+                    />
+                  )}
+                  <button onClick={() => setSelectedId(hypothesis.id)} className="min-w-0 flex-1 text-left">
+                    <div className="flex items-center gap-1.5">
+                      {hypothesis.verdict?.verified && <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-primary" title="Verified: enough independent supporting sources" />}
+                      {hypothesis.verdict?.contested && <ShieldQuestion className="h-3.5 w-3.5 shrink-0 text-amber-600" title="Contested: has contradicting evidence" />}
+                      <p className="line-clamp-2 text-sm text-ink">{hypothesis.hypothese}</p>
+                    </div>
+                    <p className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">{hypothesis.status}</p>
+                  </button>
+                </div>
               ))}
             </div>
           </aside>

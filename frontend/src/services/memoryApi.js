@@ -175,3 +175,23 @@ export function rejectHypothesis(id, reden) {
     body: JSON.stringify({ reden }),
   });
 }
+
+// Confirms/rejects several hypotheses in one call — still exactly as
+// "explicit human action" as one at a time: a human already selected every
+// id before this call happens, this only saves the repeated clicks. Each id
+// is independent server-side (see server/routes/memory.js) — one failing
+// (already confirmed, lost a supersession race, ...) never blocks the rest;
+// { results: [{ id, success, ... }] } reports each outcome individually.
+export function bulkConfirmHypotheses(ids) {
+  return memoryRequest("/hypotheses/bulk-confirm", {
+    method: "PATCH",
+    body: JSON.stringify({ ids }),
+  });
+}
+
+export function bulkRejectHypotheses(ids, reden) {
+  return memoryRequest("/hypotheses/bulk-reject", {
+    method: "PATCH",
+    body: JSON.stringify({ ids, reden }),
+  });
+}
