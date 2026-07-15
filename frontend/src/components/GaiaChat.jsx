@@ -1,12 +1,26 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, X } from 'lucide-react';
+import { Send, Bot, User, X, Reply, Smile } from 'lucide-react';
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '👀'];
+
+function newId() {
+  return (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`);
+}
 
 export function GaiaChat({ open, onClose }) {
   const [messages, setMessages] = useState([
-    { role: 'assistant', text: 'Hallo! Ik ben Gaia, je persoonlijke Hermes agent. Hoe kan ik je helpen?' }
+    { id: newId(), role: 'assistant', text: 'Hallo! Ik ben Gaia, je persoonlijke Hermes agent. Hoe kan ik je helpen?', replyTo: null, reactions: [] }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // Which message is currently being composed as a reply — quoted above the
+  // input until sent or cancelled. Purely a client-side threading affordance
+  // (the flat `history` sent to Gaia is unaffected); it just gives replies a
+  // visible parent in this UI, the way Slack/Discord-style threads do.
+  const [replyingTo, setReplyingTo] = useState(null);
+  // Which message currently has its quick-reaction row open (hover-revealed
+  // on desktop, but kept as click-state too so it works on touch).
+  const [reactionPickerFor, setReactionPickerFor] = useState(null);
   const endOfMessagesRef = useRef(null);
 
   // Dragging state
@@ -55,7 +69,7 @@ export function GaiaChat({ open, onClose }) {
   const handlePointerDown = (e) => {
     // Voorkom draggen als je op de sluitknop klikt
     if (e.target.closest('button')) return;
-    
+
     e.preventDefault();
     setIsDragging(true);
     dragRef.current = {
@@ -66,6 +80,14 @@ export function GaiaChat({ open, onClose }) {
     };
   };
 
+  const toggleReaction = (messageId, emoji) => {
+    setMessages(prev => prev.map(m => {
+      if (m.id !== messageId) return m;
+      const has = (m.reactions || []).includes(emoji);
+      return { ...m, reactions: has ? m.reactions.filter(r => r !== emoji) : [...(m.reactions || []), emoji] };
+    }));
+  };
+
   if (!open) return null;
 
   const handleSend = async (e) => {
@@ -74,12 +96,18 @@ export function GaiaChat({ open, onClose }) {
 
     const userText = input.trim();
     const history = messages.map(({ role, text }) => ({ role, text }));
+    const replyToId = replyingTo?.id || null;
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', text: userText }]);
+    setReplyingTo(null);
+    setMessages(prev => [...prev, { id: newId(), role: 'user', text: userText, replyTo: replyToId, reactions: [] }]);
     setIsLoading(true);
 
-    const assistantMessageIndex = messages.length + 1;
-    setMessages(prev => [...prev, { role: 'assistant', text: '' }]);
+    const assistantMessageId = newId();
+    setMessages(prev => [...prev, { id: assistantMessageId, role: 'assistant', text: '', replyTo: null, reactions: [] }]);
+
+    const updateAssistantText = (text) => {
+      setMessages(prev => prev.map(m => (m.id === assistantMessageId ? { ...m, text } : m)));
+    };
 
     try {
       const response = await fetch('http://localhost:4577/api/agent/chat', {
@@ -121,18 +149,10 @@ export function GaiaChat({ open, onClose }) {
             const payload = JSON.parse(line);
             if (typeof payload?.delta === 'string') {
               finalText += payload.delta;
-              setMessages(prev => {
-                const next = [...prev];
-                next[assistantMessageIndex] = { ...next[assistantMessageIndex], text: finalText };
-                return next;
-              });
+              updateAssistantText(finalText);
             } else if (typeof payload?.response === 'string') {
               finalText = payload.response;
-              setMessages(prev => {
-                const next = [...prev];
-                next[assistantMessageIndex] = { ...next[assistantMessageIndex], text: finalText };
-                return next;
-              });
+              updateAssistantText(finalText);
             }
           } catch (_err) {
             // Ignore non-JSON chunks and keep streaming.
@@ -145,11 +165,7 @@ export function GaiaChat({ open, onClose }) {
           const payload = JSON.parse(buffer.trim());
           if (typeof payload?.response === 'string') {
             finalText = payload.response;
-            setMessages(prev => {
-              const next = [...prev];
-              next[assistantMessageIndex] = { ...next[assistantMessageIndex], text: finalText };
-              return next;
-            });
+            updateAssistantText(finalText);
           }
         } catch (_err) {
           // Ignore trailing non-JSON content.
@@ -157,23 +173,21 @@ export function GaiaChat({ open, onClose }) {
       }
     } catch (err) {
       console.error('Gaia Chat Error:', err);
-      setMessages(prev => {
-        const next = [...prev];
-        next[assistantMessageIndex] = { ...next[assistantMessageIndex], text: `Oeps, er ging iets mis: ${err.message}` };
-        return next;
-      });
+      updateAssistantText(`Oeps, er ging iets mis: ${err.message}`);
     } finally {
       setIsLoading(false);
     }
   };
 
+  const findMessage = (id) => messages.find(m => m.id === id);
+
   return (
-    <div 
+    <div
       className="fixed w-80 h-[80vh] bg-background border border-border shadow-2xl rounded-2xl flex flex-col z-50 overflow-hidden"
       style={{ left: pos.x, top: pos.y }}
     >
       {/* Header (Draggable) */}
-      <div 
+      <div
         className={`flex items-center justify-between p-4 border-b border-border bg-muted/30 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         onPointerDown={handlePointerDown}
       >
@@ -188,38 +202,115 @@ export function GaiaChat({ open, onClose }) {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((msg, idx) => (
-          <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-primary/20 text-primary' : 'bg-muted text-foreground'}`}>
-              {msg.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+        {messages.map((msg) => {
+          const isUser = msg.role === 'user';
+          const parent = msg.replyTo ? findMessage(msg.replyTo) : null;
+          // The streaming assistant message starts as an empty bubble — show
+          // the "typing" dots in its place instead of a separate indicator,
+          // so the bubble itself visibly hands off from "thinking" to
+          // "streaming" the moment content arrives.
+          const isTypingPlaceholder = !isUser && isLoading && msg.text === '' && msg === messages[messages.length - 1];
+
+          return (
+            <div key={msg.id} className={`group flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isUser ? 'bg-primary/20 text-primary' : 'bg-muted text-foreground'}`}>
+                {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+              </div>
+              <div className={`flex flex-col gap-1 max-w-[80%] ${isUser ? 'items-end' : 'items-start'}`}>
+                {parent && (
+                  <div className={`text-[11px] text-muted-foreground/70 border-l-2 border-border pl-1.5 truncate max-w-[220px] ${isUser ? 'self-end text-right border-l-0 border-r-2 pr-1.5 pl-0' : ''}`}>
+                    ↪ {parent.text.slice(0, 60) || '…'}
+                  </div>
+                )}
+                <div
+                  data-testid={`gaia-msg-${msg.id}`}
+                  className={`text-sm py-2 px-3 rounded-2xl whitespace-pre-wrap ${
+                    isUser
+                      ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                      : 'bg-muted/50 text-foreground rounded-tl-sm border border-border'
+                  }`}
+                >
+                  {isTypingPlaceholder ? (
+                    <span className="flex items-center gap-1 py-0.5">
+                      <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                      <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                      <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce"></span>
+                    </span>
+                  ) : (
+                    msg.text
+                  )}
+                </div>
+
+                {msg.reactions?.length > 0 && (
+                  <div className={`flex flex-wrap gap-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    {msg.reactions.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => toggleReaction(msg.id, emoji)}
+                        title="Verwijder reactie"
+                        className="text-xs bg-accent/60 hover:bg-accent rounded-full px-1.5 py-0.5 transition-colors"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Hover actions: reply + react, hidden until the row is hovered */}
+                {!isTypingPlaceholder && (
+                  <div className={`flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <button
+                      onClick={() => setReplyingTo(msg)}
+                      title="Beantwoorden"
+                      data-testid={`gaia-reply-${msg.id}`}
+                      className="p-1 rounded text-muted-foreground/70 hover:text-primary hover:bg-accent/50 transition-colors"
+                    >
+                      <Reply className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => setReactionPickerFor(reactionPickerFor === msg.id ? null : msg.id)}
+                      title="Reageer"
+                      data-testid={`gaia-react-${msg.id}`}
+                      className="p-1 rounded text-muted-foreground/70 hover:text-primary hover:bg-accent/50 transition-colors"
+                    >
+                      <Smile className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+
+                {reactionPickerFor === msg.id && (
+                  <div className="flex items-center gap-1 rounded-full border border-border bg-background px-1.5 py-1 shadow-sm">
+                    {QUICK_REACTIONS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => { toggleReaction(msg.id, emoji); setReactionPickerFor(null); }}
+                        className="text-sm hover:scale-125 transition-transform"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className={`text-sm py-2 px-3 rounded-2xl max-w-[80%] whitespace-pre-wrap ${
-              msg.role === 'user' 
-                ? 'bg-primary text-primary-foreground rounded-tr-sm' 
-                : 'bg-muted/50 text-foreground rounded-tl-sm border border-border'
-            }`}>
-              {msg.text}
-            </div>
-          </div>
-        ))}
-        {isLoading && (
-          <div className="flex gap-3 flex-row">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-muted text-foreground">
-              <Bot className="w-4 h-4" />
-            </div>
-            <div className="text-sm py-2 px-3 rounded-2xl bg-muted/50 text-foreground rounded-tl-sm border border-border flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-              <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-              <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce"></span>
-            </div>
-          </div>
-        )}
+          );
+        })}
         <div ref={endOfMessagesRef} />
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSend} className="p-3 border-t border-border bg-background">
-        <div className="relative flex items-center">
+      <form onSubmit={handleSend} className="border-t border-border bg-background">
+        {replyingTo && (
+          <div className="flex items-center justify-between gap-2 px-3 pt-2 text-[11px] text-muted-foreground">
+            <span className="truncate">
+              ↪ Antwoord op: <span className="text-foreground/80">{replyingTo.text.slice(0, 50) || '…'}</span>
+            </span>
+            <button type="button" onClick={() => setReplyingTo(null)} className="shrink-0 hover:text-foreground transition-colors">
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+        <div className="relative flex items-center p-3">
           <input
             type="text"
             value={input}
@@ -228,10 +319,10 @@ export function GaiaChat({ open, onClose }) {
             className="w-full bg-muted/30 border border-border rounded-full pl-4 pr-10 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:bg-background transition-colors"
             disabled={isLoading}
           />
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={!input.trim() || isLoading}
-            className="absolute right-1.5 w-8 h-8 flex items-center justify-center bg-primary text-primary-foreground rounded-full disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
+            className="absolute right-4 w-8 h-8 flex items-center justify-center bg-primary text-primary-foreground rounded-full disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
           >
             <Send className="w-4 h-4 ml-0.5" />
           </button>
