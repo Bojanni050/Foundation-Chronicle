@@ -55,37 +55,44 @@ function dedupeConsecutive(lines) {
   return out;
 }
 
-// Returns false for both "server unreachable" and "not configured yet" —
-// callers that care about the difference check apiUrl themselves before
-// deciding whether to queue a retry.
+// "retry" covers both "server unreachable" and any 5xx — worth trying again
+// later. "drop" covers "not configured yet" and any 4xx: the server has
+// already told us this exact request is invalid (bad payload, bad auth),
+// and retrying an unchanged body on a timer would just repeat the same
+// rejection forever instead of ever clearing the queue.
 async function postCapture(body) {
   const { apiUrl, apiToken } = getSettings();
-  if (!apiUrl) return false;
+  if (!apiUrl) return "drop";
   try {
     const res = await fetch(`${apiUrl}/api/objects/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
       body: JSON.stringify(body),
     });
-    return res.ok;
+    if (res.ok) return "ok";
+    if (res.status >= 400 && res.status < 500) {
+      console.error(`[uiaCapture] server rejected activity object (${res.status}), dropping`);
+      return "drop";
+    }
+    return "retry";
   } catch (err) {
     console.error("[uiaCapture] failed to send activity object, queued for retry:", err);
-    return false;
+    return "retry";
   }
 }
 
 async function sendOrQueue(sessionId, body) {
-  const ok = await postCapture(body);
+  const result = await postCapture(body);
   const pending = loadPending();
-  if (ok) {
-    if (pending[sessionId]) {
-      delete pending[sessionId];
-      savePending(pending);
-    }
+  if (result === "retry") {
+    pending[sessionId] = body;
+    savePending(pending);
     return;
   }
-  pending[sessionId] = body;
-  savePending(pending);
+  if (pending[sessionId]) {
+    delete pending[sessionId];
+    savePending(pending);
+  }
 }
 
 // Retries every still-pending session on its own request body (the latest
@@ -98,8 +105,8 @@ async function flushPending() {
   const sessionIds = Object.keys(pending);
   if (sessionIds.length === 0) return;
   for (const sessionId of sessionIds) {
-    const ok = await postCapture(pending[sessionId]);
-    if (ok) {
+    const result = await postCapture(pending[sessionId]);
+    if (result !== "retry") {
       const latest = loadPending();
       delete latest[sessionId];
       savePending(latest);
@@ -128,7 +135,11 @@ async function handleCapture(payload) {
   currentSession.lines = dedupeConsecutive([...currentSession.lines, ...newLines]);
 
   const title = windowTitle ? `${appName} — ${windowTitle}` : appName;
-  const content = currentSession.lines.join("\n\n");
+  // Text capture is off by default (see Settings), so lines is routinely
+  // empty — falling back to the title keeps plain window-tracking useful on
+  // its own instead of silently producing objects with empty content, which
+  // the server rejects outright (POST /api/objects/import requires content).
+  const content = currentSession.lines.length ? currentSession.lines.join("\n\n") : title;
 
   const { apiUrl } = getSettings();
   if (!apiUrl) return; // no local server configured — nothing to queue to

@@ -37,19 +37,28 @@ function savePending(pending) {
   }
 }
 
+// "retry" covers "server unreachable" and any 5xx. "drop" covers "not
+// configured yet" and any 4xx — the server already rejected this exact
+// body, so retrying it unchanged on a timer would just repeat the same
+// rejection forever instead of ever clearing the queue.
 async function postCapture(body) {
   const { apiUrl, apiToken } = getSettings();
-  if (!apiUrl) return false;
+  if (!apiUrl) return "drop";
   try {
     const res = await fetch(`${apiUrl}/api/objects/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
       body: JSON.stringify(body),
     });
-    return res.ok;
+    if (res.ok) return "ok";
+    if (res.status >= 400 && res.status < 500) {
+      console.error(`[clipboardCapture] server rejected clipboard object (${res.status}), dropping`);
+      return "drop";
+    }
+    return "retry";
   } catch (err) {
     console.error("[clipboardCapture] failed to send clipboard object, queued for retry:", err);
-    return false;
+    return "retry";
   }
 }
 
@@ -58,8 +67,8 @@ async function flushPending() {
   const ids = Object.keys(pending);
   if (ids.length === 0) return;
   for (const id of ids) {
-    const ok = await postCapture(pending[id]);
-    if (ok) {
+    const result = await postCapture(pending[id]);
+    if (result !== "retry") {
       const latest = loadPending();
       delete latest[id];
       savePending(latest);
@@ -83,8 +92,8 @@ async function handleCapture(payload) {
     sourceProvider: "clipboard",
   };
 
-  const ok = await postCapture(body);
-  if (!ok) {
+  const result = await postCapture(body);
+  if (result === "retry") {
     const pending = loadPending();
     pending[id] = body;
     savePending(pending);
