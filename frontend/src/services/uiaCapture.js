@@ -16,6 +16,36 @@ import { getSettings } from "@/lib/settings";
 // update the same object instead of creating a new one each time.
 let currentSession = null; // { appName, windowTitle, sessionId, lines: string[] }
 let unlisten = null;
+let retryTimer = null;
+
+// A failed POST used to just get logged and dropped, silently losing
+// whatever activity was captured during a server restart or a flaky local
+// connection. Instead, failures persist here — keyed by sessionId rather
+// than queued per-attempt — so a session that keeps failing simply has its
+// entry overwritten with the latest (always superset, since lines only
+// grow) content each time, and a later successful send for that session
+// clears it. That ordering means a stale retry can never clobber a newer
+// successful write with fewer lines. localStorage (not IndexedDB) survives
+// an app restart without pulling in the app's IndexedDB object schema.
+const PENDING_KEY = "chronicle:uiaCapturePendingQueue";
+const RETRY_INTERVAL_MS = 20_000;
+
+function loadPending() {
+  try {
+    return JSON.parse(localStorage.getItem(PENDING_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function savePending(pending) {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+  } catch {
+    // Storage unavailable/full — the retry queue just won't survive a
+    // restart this time; the in-memory session still tries live sends.
+  }
+}
 
 function dedupeConsecutive(lines) {
   const out = [];
@@ -23,6 +53,58 @@ function dedupeConsecutive(lines) {
     if (out[out.length - 1] !== line) out.push(line);
   }
   return out;
+}
+
+// Returns false for both "server unreachable" and "not configured yet" —
+// callers that care about the difference check apiUrl themselves before
+// deciding whether to queue a retry.
+async function postCapture(body) {
+  const { apiUrl, apiToken } = getSettings();
+  if (!apiUrl) return false;
+  try {
+    const res = await fetch(`${apiUrl}/api/objects/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
+      body: JSON.stringify(body),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("[uiaCapture] failed to send activity object, queued for retry:", err);
+    return false;
+  }
+}
+
+async function sendOrQueue(sessionId, body) {
+  const ok = await postCapture(body);
+  const pending = loadPending();
+  if (ok) {
+    if (pending[sessionId]) {
+      delete pending[sessionId];
+      savePending(pending);
+    }
+    return;
+  }
+  pending[sessionId] = body;
+  savePending(pending);
+}
+
+// Retries every still-pending session on its own request body (the latest
+// one recorded for that session, not necessarily what's in currentSession
+// right now — the session may have moved on or the app may have restarted
+// since). Runs on a timer plus once at listener startup, so anything left
+// over from a previous crashed/closed run gets a chance to land too.
+async function flushPending() {
+  const pending = loadPending();
+  const sessionIds = Object.keys(pending);
+  if (sessionIds.length === 0) return;
+  for (const sessionId of sessionIds) {
+    const ok = await postCapture(pending[sessionId]);
+    if (ok) {
+      const latest = loadPending();
+      delete latest[sessionId];
+      savePending(latest);
+    }
+  }
 }
 
 async function handleCapture(payload) {
@@ -48,28 +130,20 @@ async function handleCapture(payload) {
   const title = windowTitle ? `${appName} — ${windowTitle}` : appName;
   const content = currentSession.lines.join("\n\n");
 
-  const { apiUrl, apiToken } = getSettings();
+  const { apiUrl } = getSettings();
   if (!apiUrl) return; // no local server configured — nothing to queue to
 
-  try {
-    await fetch(`${apiUrl}/api/objects/import`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
-      body: JSON.stringify({
-        type: "activity",
-        title,
-        content,
-        tags: [appName],
-        sourceProvider: "uia",
-        // Not a real URL — just a stable, unique key so
-        // deriveProviderConversationId() gives pollInbox() something to
-        // match repeated pushes for this session against.
-        url: `uia://session/${currentSession.sessionId}`,
-      }),
-    });
-  } catch (err) {
-    console.error("[uiaCapture] failed to queue activity object:", err);
-  }
+  await sendOrQueue(currentSession.sessionId, {
+    type: "activity",
+    title,
+    content,
+    tags: [appName],
+    sourceProvider: "uia",
+    // Not a real URL — just a stable, unique key so
+    // deriveProviderConversationId() gives pollInbox() something to
+    // match repeated pushes for this session against.
+    url: `uia://session/${currentSession.sessionId}`,
+  });
 }
 
 /**
@@ -83,6 +157,10 @@ export async function startUiaCaptureListener() {
     const { listen } = await import("@tauri-apps/api/event");
     if (unlisten) unlisten();
     unlisten = await listen("uia-capture", (event) => handleCapture(event.payload));
+    flushPending();
+    if (!retryTimer) {
+      retryTimer = setInterval(flushPending, RETRY_INTERVAL_MS);
+    }
   } catch {
     // Not running under Tauri — nothing to listen to.
   }
@@ -92,6 +170,10 @@ export function stopUiaCaptureListener() {
   if (unlisten) {
     unlisten();
     unlisten = null;
+  }
+  if (retryTimer) {
+    clearInterval(retryTimer);
+    retryTimer = null;
   }
   currentSession = null;
 }
