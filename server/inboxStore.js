@@ -3,8 +3,9 @@ const path = require("path");
 const { contentHash } = require("./contentHash");
 const { deriveProviderConversationId } = require("./providerConversationId");
 
-// Shared by server/index.js (extension imports) and screenpipeIngest.js
-// (automatic activity capture) — a single read/write path avoids two writers
+// Shared by server/index.js for every capture source that queues through
+// /api/objects/import (extension imports, bulk import, WordPress connector,
+// UIA activity capture) — a single read/write path avoids two writers
 // racing on the same file.
 const DATA_DIR = path.join(__dirname, "data");
 const INBOX_FILE = path.join(DATA_DIR, "inbox.json");

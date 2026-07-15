@@ -22,6 +22,7 @@ use tauri::{AppHandle, Emitter};
 use windows::core::{Interface, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, WPARAM};
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::System::Threading::{
     GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
     PROCESS_QUERY_LIMITED_INFORMATION,
@@ -32,6 +33,7 @@ use windows::Win32::UI::Accessibility::{
     HWINEVENTHOOK, UIA_DocumentControlTypeId, UIA_EditControlTypeId, UIA_TextControlTypeId,
     UIA_ValuePatternId,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
     PostThreadMessageW, TranslateMessage, EVENT_SYSTEM_FOREGROUND, MSG, WINEVENT_OUTOFCONTEXT,
@@ -50,6 +52,29 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 // Skip emitting for windows focused only briefly (alt-tabbing through
 // several apps) — avoids flooding the frontend with noise nobody asked for.
 const MIN_FOCUS_DURATION: Duration = Duration::from_millis(800);
+// No keyboard/mouse input for this long means the user stepped away — stop
+// capturing so idle stretches (screen left open, away from keyboard) don't
+// get recorded as activity. 5 minutes matches the common OS-level idle
+// default (e.g. Windows' own lock-screen "away" heuristics).
+const IDLE_THRESHOLD: Duration = Duration::from_secs(5 * 60);
+
+// GetLastInputInfo reports the tick count (ms since boot) of the last
+// keyboard/mouse input system-wide, not just for this process — exactly
+// what "has the user stepped away" needs. dwTime and GetTickCount64 share
+// the same 32-bit-wrapping millisecond clock, so the subtraction is done in
+// wrapping u32 space; that's fine since idle durations of interest here are
+// minutes, nowhere near the ~49.7 day wrap period.
+fn idle_duration() -> Duration {
+    let mut info = LASTINPUTINFO {
+        cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+        dwTime: 0,
+    };
+    if !unsafe { GetLastInputInfo(&mut info) }.as_bool() {
+        return Duration::ZERO;
+    }
+    let now_low = (unsafe { GetTickCount64() } & 0xFFFF_FFFF) as u32;
+    Duration::from_millis(now_low.wrapping_sub(info.dwTime) as u64)
+}
 
 // A single all-caps/mixed-case/digit/symbol token with no spaces is the same
 // "password-shaped" heuristic already described in this codebase's own
@@ -284,6 +309,9 @@ fn emit_if_stable() {
     if since.elapsed() < MIN_FOCUS_DURATION {
         return;
     }
+    if idle_duration() >= IDLE_THRESHOLD {
+        return;
+    }
     do_capture();
 }
 
@@ -383,7 +411,9 @@ pub fn start(app: AppHandle, include_text: bool, ocr_fallback: bool) {
             }
             if last_refresh.elapsed() >= REFRESH_INTERVAL {
                 last_refresh = Instant::now();
-                do_capture();
+                if idle_duration() < IDLE_THRESHOLD {
+                    do_capture();
+                }
             }
         }
 
