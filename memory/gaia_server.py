@@ -9,6 +9,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Nothing in the installed hermes package loads .env files — it expects
+# provider keys (OPENROUTER_API_KEY etc.) to already be in the process
+# environment. The parent Node process only loads server/.env, not this
+# directory's, so without this, gaia_server.py's own memory/.env content
+# (OPENROUTER_API_KEY, HERMES_MODEL) was silently invisible to it and every
+# provider resolution failed with "No LLM provider configured." Must run
+# before the HERMES_HOME/hermes_cli setup below, which reads these values.
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 # --------------------------------------------------------------------------
 # Option B: Gaia gets its own dedicated HERMES_HOME, isolated from the
 # user's personal Hermes CLI config/state/skills — must be set before any
