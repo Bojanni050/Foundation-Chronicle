@@ -44,11 +44,36 @@ const PORT = process.env.CHRONICLE_PORT || 4577;
 
 const allowedOriginsPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$|^chrome-extension:\/\//;
 
+// Retries only a connection-refused failure — the signature of "the
+// memory-process hasn't finished booting yet" (it loads a ~1.5-2GB ONNX
+// embedding model before it starts listening, so this process is already
+// accepting requests and proxying to it well before it's ready) and, later,
+// the same signature during its 3s auto-restart-on-crash window (see
+// startMemoryProcess below). Any other failure (a genuine hang, a bad
+// upstream response) isn't retried — those aren't "not up yet", so retrying
+// blindly would just add latency with no chance of succeeding. init.body is
+// a plain JSON string here (not a stream), so it's safe to resend as-is on
+// every attempt.
+const MEMORY_RETRY_DELAYS_MS = [250, 500, 1000, 2000];
+
+async function fetchMemoryWithRetry(target, init) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(target, init);
+    } catch (err) {
+      const isConnRefused = err.cause?.code === "ECONNREFUSED";
+      if (!isConnRefused || attempt >= MEMORY_RETRY_DELAYS_MS.length) throw err;
+      await new Promise((resolve) => setTimeout(resolve, MEMORY_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+}
+
 // Forwards a request byte-for-byte to the memory-process over loopback and
 // streams the response back — including SSE (the /runs/:runId/events route
 // depends on this staying a stream, not a buffered read). If the
-// memory-process is down, mid-restart, or hung, this fails fast with a 503
-// instead of hanging the capture process's own event loop waiting on it.
+// memory-process is still down after the retries above, this fails fast
+// with a 503 instead of hanging the capture process's own event loop
+// waiting on it.
 async function proxyToMemory(req, res) {
   const target = `http://${MEMORY_HOST}:${MEMORY_PORT}${req.originalUrl}`;
   try {
@@ -72,7 +97,7 @@ async function proxyToMemory(req, res) {
       init.body = JSON.stringify(req.body ?? {});
     }
 
-    const upstream = await fetch(target, init);
+    const upstream = await fetchMemoryWithRetry(target, init);
     res.status(upstream.status);
     upstream.headers.forEach((value, key) => {
       if (key.toLowerCase() === "content-encoding") return; // fetch already decoded the body
