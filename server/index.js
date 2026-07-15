@@ -44,26 +44,28 @@ const PORT = process.env.CHRONICLE_PORT || 4577;
 
 const allowedOriginsPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$|^chrome-extension:\/\//;
 
-// Retries only a connection-refused failure — the signature of "the
-// memory-process hasn't finished booting yet" (it loads a ~1.5-2GB ONNX
-// embedding model before it starts listening, so this process is already
-// accepting requests and proxying to it well before it's ready) and, later,
-// the same signature during its 3s auto-restart-on-crash window (see
-// startMemoryProcess below). Any other failure (a genuine hang, a bad
-// upstream response) isn't retried — those aren't "not up yet", so retrying
-// blindly would just add latency with no chance of succeeding. init.body is
-// a plain JSON string here (not a stream), so it's safe to resend as-is on
-// every attempt.
-const MEMORY_RETRY_DELAYS_MS = [250, 500, 1000, 2000];
+// Retries only a connection-refused failure — the signature of "this
+// sidecar process hasn't finished booting yet". Both proxied processes are
+// spawned by this file and this file starts accepting requests immediately,
+// well before either sidecar is actually listening: the memory-process
+// loads a ~1.5-2GB ONNX embedding model first (see startMemoryProcess
+// below), and Hermes goes through `uv run python gaia_server.py` plus its
+// own FastAPI startup (see startHermesProcess below). Same signature again,
+// later, during either process's 3s auto-restart-on-crash window. Any other
+// failure (a genuine hang, a bad upstream response) isn't retried — those
+// aren't "not up yet", so retrying blindly would just add latency with no
+// chance of succeeding. init.body is a plain JSON string here (not a
+// stream), so it's safe to resend as-is on every attempt.
+const CONN_REFUSED_RETRY_DELAYS_MS = [250, 500, 1000, 2000];
 
-async function fetchMemoryWithRetry(target, init) {
+async function fetchWithConnRefusedRetry(target, init) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fetch(target, init);
     } catch (err) {
       const isConnRefused = err.cause?.code === "ECONNREFUSED";
-      if (!isConnRefused || attempt >= MEMORY_RETRY_DELAYS_MS.length) throw err;
-      await new Promise((resolve) => setTimeout(resolve, MEMORY_RETRY_DELAYS_MS[attempt]));
+      if (!isConnRefused || attempt >= CONN_REFUSED_RETRY_DELAYS_MS.length) throw err;
+      await new Promise((resolve) => setTimeout(resolve, CONN_REFUSED_RETRY_DELAYS_MS[attempt]));
     }
   }
 }
@@ -97,7 +99,7 @@ async function proxyToMemory(req, res) {
       init.body = JSON.stringify(req.body ?? {});
     }
 
-    const upstream = await fetchMemoryWithRetry(target, init);
+    const upstream = await fetchWithConnRefusedRetry(target, init);
     res.status(upstream.status);
     upstream.headers.forEach((value, key) => {
       if (key.toLowerCase() === "content-encoding") return; // fetch already decoded the body
@@ -131,7 +133,7 @@ async function proxyToHermes(req, res) {
       init.body = JSON.stringify(req.body ?? {});
     }
 
-    const upstream = await fetch(target, init);
+    const upstream = await fetchWithConnRefusedRetry(target, init);
     res.status(upstream.status);
     upstream.headers.forEach((value, key) => {
       if (key.toLowerCase() === "content-encoding") return;
