@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Plus,
   Search,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import { OBJECT_TYPES } from "@/lib/objectTypes";
 import { useTypes } from "@/hooks/useTypes";
+import { fetchResourceUsage } from "@/services/statusService";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +27,44 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+const RESOURCE_POLL_MS = 4000;
+
+function EngineUsageRow({ label, usage }) {
+  const online = usage != null;
+  return (
+    <div className="flex items-center gap-2 px-3 py-1 text-[11px] text-muted-foreground/80">
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${online ? "bg-primary/70" : "bg-muted-foreground/30"}`} />
+      <span className="flex-1 truncate">{label}</span>
+      {online ? (
+        <span className="tabular-nums text-muted-foreground/70">
+          {usage.cpuPercent}% · {usage.memoryMB}MB
+        </span>
+      ) : (
+        <span className="text-muted-foreground/50">offline</span>
+      )}
+    </div>
+  );
+}
+
+function EngineUsage() {
+  const [usage, setUsage] = useState({ capture: null, memory: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => fetchResourceUsage().then((u) => { if (!cancelled) setUsage(u); });
+    poll();
+    const id = setInterval(poll, RESOURCE_POLL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  return (
+    <div className="mb-1 space-y-0.5" data-testid="engine-usage">
+      <EngineUsageRow label="Capture engine" usage={usage.capture} />
+      <EngineUsageRow label="Memory engine" usage={usage.memory} />
+    </div>
+  );
+}
 
 function NavRow({ icon: Icon, label, count, active, onClick, testId, iconClassName = "" }) {
   return (
@@ -207,6 +247,7 @@ export function Sidebar({
 
       {/* footer */}
       <div className="mt-auto border-t border-border px-3 py-2">
+        <EngineUsage />
         <NavRow
           icon={Activity}
           label="AI Pulse"

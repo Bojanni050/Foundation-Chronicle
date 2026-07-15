@@ -1,5 +1,22 @@
 import { AIService } from "./AIService";
 
+// Capture engine (this process, server/index.js) and memory engine
+// (server/memory-process/index.js) each self-sample their own CPU/memory
+// (server/resourceUsage.js) and expose it on a plain GET — capture directly,
+// memory proxied through the existing /api/memory prefix. Either can be
+// null if that process is down; the caller decides how to render that.
+export async function fetchResourceUsage() {
+  const { getSettings } = await import("../lib/settings");
+  const { apiUrl } = getSettings();
+  if (!apiUrl) return { capture: null, memory: null };
+
+  const [capture, memory] = await Promise.all([
+    fetch(`${apiUrl}/api/settings/resource-usage`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetch(`${apiUrl}/api/memory/resource-usage`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+  ]);
+  return { capture, memory };
+}
+
 export async function fetchSystemStatus() {
   const result = {
     backend: "offline",

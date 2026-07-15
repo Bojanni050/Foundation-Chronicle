@@ -29,6 +29,7 @@ const personaRouter = require("../routes/persona");
 const embeddingRouter = require("../routes/embedding");
 const memoryRouter = require("../routes/memory");
 const { pushCaptureEvent, getRecentCaptureEvents } = require("../captureActivityLog");
+const { getResourceUsage } = require("../resourceUsage");
 
 // Localhost-only, never exposed to the browser directly — Chronicle's
 // capture process (server/index.js) is the only caller, proxying
@@ -46,6 +47,16 @@ app.use("/api/objects", embeddingRouter); // POST /api/objects/:objectId/embed
 app.use("/api/memory", memoryRouter); // episodes, hypotheses, evidence, knowledge gaps
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
+
+// GET /api/memory/resource-usage — this process's own CPU/memory (the
+// memory engine: consolidator, auto-heal, embedding pipeline, persona/
+// hypothesis routes). Reachable through Chronicle's existing /api/memory
+// proxy (server/index.js's proxyToMemory) — no separate proxy route needed.
+// Mounted directly here rather than in routes/memory.js since it reports on
+// the process itself, not on episodes/hypotheses/evidence data.
+app.get("/api/memory/resource-usage", (_req, res) => {
+  res.json(getResourceUsage());
+});
 
 // POST/GET /api/settings/capture-activity — the "event-hook after
 // distribution" plug-in point: pollInbox() (frontend) stays the sole inbox

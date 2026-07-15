@@ -3,12 +3,21 @@ const { pool } = require("../db");
 const { TOKEN } = require("../auth");
 const { getModel: getEmbeddingModel, setModel: setEmbeddingModel, MODEL_OPTIONS } = require("../embedding");
 const { reembedAllRows } = require("../reembed");
+const { getResourceUsage } = require("../resourceUsage");
 
 const router = express.Router();
 
 // GET /api/settings/token
 router.get("/token", (_req, res) => {
   res.json({ token: TOKEN });
+});
+
+// GET /api/settings/resource-usage — this process only (the capture engine:
+// inbox, attachments, connectors). The memory-process reports its own via
+// GET /api/memory/resource-usage, proxied over loopback like everything else
+// under /api/memory — the two are separate OS processes, each samples itself.
+router.get("/resource-usage", (_req, res) => {
+  res.json(getResourceUsage());
 });
 
 // GET /api/settings/status
