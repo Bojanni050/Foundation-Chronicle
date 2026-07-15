@@ -165,15 +165,18 @@ app.use("/api/settings/chatgpt-import", chatgptImportRouter);
 app.use("/api/attachments", attachmentsRouter);
 app.use("/api/connectors", connectorsRouter);
 
-// Extension → queue a chat object
+// Extension (and other capture sources, e.g. uiaCapture.js) → queue an object
 app.post("/api/objects/import", requireAuth, (req, res) => {
-  const { title, content, sourceProvider, url, tags, turns, occurredAt, attachments } = req.body || {};
+  const { type, source, title, content, sourceProvider, url, tags, turns, occurredAt, attachments } = req.body || {};
   if (!content) return res.status(400).json({ error: "content required" });
   const objectId = "inbox_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   pushToInbox({
     objectId,
-    type: "chat",
-    source: "extension",
+    // Defaults match the actual browser extension, which never sends these
+    // fields — other callers (uiaCapture.js sends type: "activity") were
+    // previously silently overridden here and always filed as a chat.
+    type: type || "chat",
+    source: source || "extension",
     title: title || "Imported chat",
     content,
     sourceProvider: sourceProvider || null,
