@@ -12,6 +12,7 @@ import { reflectOnHypotheses } from "@/services/hypothesisReflectionSync";
 import { runDistributor } from "@/services/contentDistributor";
 import { findRelatedLocal } from "@/services/weave";
 import { startUiaCaptureListener } from "@/services/uiaCapture";
+import { startClipboardCaptureListener } from "@/services/clipboardCapture";
 import { fetchSystemStatus } from "@/services/statusService";
 import { getSourceUsage } from "@/services/memoryApi";
 import { invokeTauri } from "@/lib/tauri";
@@ -162,6 +163,15 @@ export default function App() {
     if (!uiaCaptureEnabled) return;
     invokeTauri("start_uia_capture", { includeText: !!uiaCaptureText, ocrFallback: !!uiaCaptureOcrFallback });
     startUiaCaptureListener();
+  }, []);
+
+  // Native Windows clipboard capture (desktop app only) — same opt-in,
+  // fail-silent-outside-Tauri pattern as UIA capture above.
+  useEffect(() => {
+    const { clipboardCaptureEnabled } = getSettings();
+    if (!clipboardCaptureEnabled) return;
+    invokeTauri("start_clipboard_capture");
+    startClipboardCaptureListener();
   }, []);
 
   const selectedObject = allObjects.find((o) => o.id === selectedId) || null;

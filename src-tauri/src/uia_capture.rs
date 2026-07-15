@@ -76,32 +76,7 @@ fn idle_duration() -> Duration {
     Duration::from_millis(now_low.wrapping_sub(info.dwTime) as u64)
 }
 
-// A single all-caps/mixed-case/digit/symbol token with no spaces is the same
-// "password-shaped" heuristic already described in this codebase's own
-// clipboard-capture copy (SettingsDialog.jsx's "Store clipboard text
-// content" section). No equivalent exists in Rust yet — PureMemory's version
-// of this logic lives entirely in the external Go agent being replaced.
-fn looks_like_password(token: &str) -> bool {
-    if token.len() < 8 || token.contains(char::is_whitespace) {
-        return false;
-    }
-    let has_upper = token.chars().any(|c| c.is_ascii_uppercase());
-    let has_lower = token.chars().any(|c| c.is_ascii_lowercase());
-    let has_digit = token.chars().any(|c| c.is_ascii_digit());
-    let has_symbol = token.chars().any(|c| !c.is_alphanumeric());
-    [has_upper, has_lower, has_digit, has_symbol]
-        .iter()
-        .filter(|&&b| b)
-        .count()
-        >= 3
-}
-
-fn redact(text: &str) -> String {
-    text.split_whitespace()
-        .map(|tok| if looks_like_password(tok) { "[redacted]" } else { tok })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+use crate::capture_redact::redact;
 
 #[derive(Serialize, Clone)]
 struct UiaCapturePayload {

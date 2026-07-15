@@ -4,8 +4,11 @@ use std::path::PathBuf;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
+mod capture_redact;
+mod clipboard_capture;
 mod ocr_capture;
 mod uia_capture;
+use clipboard_capture::{start_clipboard_capture, stop_clipboard_capture};
 use uia_capture::{start_uia_capture, stop_uia_capture};
 
 // Local model config — a small JSON file in the app's own config dir, since
@@ -71,7 +74,9 @@ pub fn run() {
       get_local_model_path,
       set_local_model_path,
       start_uia_capture,
-      stop_uia_capture
+      stop_uia_capture,
+      start_clipboard_capture,
+      stop_clipboard_capture
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

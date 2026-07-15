@@ -9,6 +9,7 @@ import { objectRepository } from "@/repositories";
 import { getDB, OBJECT_STORE } from "@/lib/db";
 import { invokeTauri } from "@/lib/tauri";
 import { startUiaCaptureListener, stopUiaCaptureListener } from "@/services/uiaCapture";
+import { startClipboardCaptureListener, stopClipboardCaptureListener } from "@/services/clipboardCapture";
 import { relTime } from "@/lib/format";
 import {
   buildChronicleBackup,
@@ -420,6 +421,20 @@ export function SettingsDialog({ open, onOpenChange }) {
     }
   };
 
+  // Native clipboard capture — see src-tauri/src/clipboard_capture.rs. Same
+  // frontend-only on/off pattern as UIA capture above; no server-side
+  // toggle needed.
+  const toggleClipboardCapture = async (enabled) => {
+    update({ clipboardCaptureEnabled: enabled });
+    if (enabled) {
+      await invokeTauri("start_clipboard_capture");
+      await startClipboardCaptureListener();
+    } else {
+      await invokeTauri("stop_clipboard_capture");
+      stopClipboardCaptureListener();
+    }
+  };
+
   // Activity objects don't get their own browsable nav item (see Sidebar.jsx) —
   // they're passive AI-collected context, not content the user authored — but
   // given this is a privacy-sensitive capture (window text, redacted passwords
@@ -654,6 +669,31 @@ export function SettingsDialog({ open, onOpenChange }) {
                 memory-only screenshot and use Windows' built-in OCR to extract the text. Fast and 100% local.
               </p>
             </div>
+          </section>
+
+          <div className="border-t border-border" />
+
+          {/* Native clipboard capture (desktop app only) */}
+          <section className="space-y-4">
+            <h3 className="font-serif text-base text-ink">Clipboard capture (Windows)</h3>
+            <p className="text-xs text-muted-foreground">
+              Reads text you copy directly from the clipboard via Windows' own APIs — no external process. Off by
+              default: clipboard content is the most sensitive thing this app could passively collect. Any clip
+              marked by its source app as excluded from clipboard monitoring (the same signal password managers use
+              to keep Windows' own Clipboard History from seeing what they copy) is skipped entirely, and anything
+              shaped like a password is redacted before it ever leaves the capture module. Runs inside Chronicle's
+              desktop app; has no effect in a browser preview.
+            </p>
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                data-testid="clipboard-capture-toggle"
+                checked={!!s.clipboardCaptureEnabled}
+                onChange={(e) => toggleClipboardCapture(e.target.checked)}
+                className="h-4 w-4 rounded border-border"
+              />
+              Track clipboard text
+            </label>
 
             <div className="pt-1">
               <button

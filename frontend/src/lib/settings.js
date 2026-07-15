@@ -27,6 +27,12 @@ const DEFAULTS = {
   uiaCaptureEnabled: false,
   uiaCaptureText: false,
   uiaCaptureOcrFallback: false,
+  // Native Windows clipboard capture (desktop app only). Off by default —
+  // opt-in, same as UIA capture, and kept as its own flag rather than
+  // folded into uiaCaptureText: clipboard content is a materially more
+  // sensitive source (password managers, one-time codes) than on-screen
+  // text, so it should never turn on as a side effect of another toggle.
+  clipboardCaptureEnabled: false,
   models: {
     tagging: DEFAULT_MODEL,
     weave: DEFAULT_MODEL,
