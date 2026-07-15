@@ -23,6 +23,36 @@ export function GaiaChat({ open, onClose }) {
   const [reactionPickerFor, setReactionPickerFor] = useState(null);
   const endOfMessagesRef = useRef(null);
 
+  // Gaia's backend (Hermes) exposes no "thinking" vs "using a tool" event —
+  // stream_callback only ever fires with text deltas, nothing distinguishes
+  // tool execution from the API. What IS reliable: no text streams in while
+  // a tool call is running (only actual token generation produces deltas),
+  // so a silence gap *after* streaming has already started is a real signal
+  // something other than typing is happening, not a guess dressed up as one.
+  const [activityPhase, setActivityPhase] = useState(null); // null | 'thinking' | 'streaming' | 'paused'
+  const lastDeltaAtRef = useRef(0);
+  const hasStreamedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isLoading) {
+      setActivityPhase(null);
+      return;
+    }
+    const PAUSE_THRESHOLD_MS = 1800;
+    const tick = () => {
+      if (!hasStreamedRef.current) {
+        setActivityPhase('thinking');
+      } else if (Date.now() - lastDeltaAtRef.current > PAUSE_THRESHOLD_MS) {
+        setActivityPhase('paused');
+      } else {
+        setActivityPhase('streaming');
+      }
+    };
+    tick();
+    const id = setInterval(tick, 400);
+    return () => clearInterval(id);
+  }, [isLoading]);
+
   // Dragging state
   const [pos, setPos] = useState({ x: window.innerWidth - 380, y: Math.max(20, window.innerHeight - 800) });
   const [isDragging, setIsDragging] = useState(false);
@@ -104,9 +134,18 @@ export function GaiaChat({ open, onClose }) {
 
     const assistantMessageId = newId();
     setMessages(prev => [...prev, { id: assistantMessageId, role: 'assistant', text: '', replyTo: null, reactions: [] }]);
+    hasStreamedRef.current = false;
+    lastDeltaAtRef.current = Date.now();
 
     const updateAssistantText = (text) => {
       setMessages(prev => prev.map(m => (m.id === assistantMessageId ? { ...m, text } : m)));
+    };
+    // Every actual content chunk resets the silence clock — see the
+    // activityPhase effect above for why this is the signal we use.
+    const markDelta = (text) => {
+      hasStreamedRef.current = true;
+      lastDeltaAtRef.current = Date.now();
+      updateAssistantText(text);
     };
 
     try {
@@ -149,10 +188,10 @@ export function GaiaChat({ open, onClose }) {
             const payload = JSON.parse(line);
             if (typeof payload?.delta === 'string') {
               finalText += payload.delta;
-              updateAssistantText(finalText);
+              markDelta(finalText);
             } else if (typeof payload?.response === 'string') {
               finalText = payload.response;
-              updateAssistantText(finalText);
+              markDelta(finalText);
             }
           } catch (_err) {
             // Ignore non-JSON chunks and keep streaming.
@@ -205,11 +244,12 @@ export function GaiaChat({ open, onClose }) {
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
           const parent = msg.replyTo ? findMessage(msg.replyTo) : null;
+          const isActiveAssistantMsg = !isUser && isLoading && msg === messages[messages.length - 1];
           // The streaming assistant message starts as an empty bubble — show
-          // the "typing" dots in its place instead of a separate indicator,
-          // so the bubble itself visibly hands off from "thinking" to
-          // "streaming" the moment content arrives.
-          const isTypingPlaceholder = !isUser && isLoading && msg.text === '' && msg === messages[messages.length - 1];
+          // status in its place instead of a separate indicator, so the
+          // bubble itself visibly hands off between phases.
+          const isTypingPlaceholder = isActiveAssistantMsg && activityPhase === 'thinking';
+          const isPaused = isActiveAssistantMsg && activityPhase === 'paused';
 
           return (
             <div key={msg.id} className={`group flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -231,13 +271,27 @@ export function GaiaChat({ open, onClose }) {
                   }`}
                 >
                   {isTypingPlaceholder ? (
-                    <span className="flex items-center gap-1 py-0.5">
-                      <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                      <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                      <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce"></span>
+                    <span className="flex items-center gap-1.5 py-0.5 text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                        <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                        <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce"></span>
+                      </span>
+                      <span className="text-xs italic">Denkt na...</span>
                     </span>
                   ) : (
-                    msg.text
+                    <>
+                      {msg.text}
+                      {isPaused && (
+                        <span
+                          data-testid="gaia-paused-indicator"
+                          className="mt-1 flex items-center gap-1 text-xs italic text-muted-foreground/70"
+                        >
+                          <span className="w-1 h-1 bg-foreground/40 rounded-full animate-pulse"></span>
+                          Gebruikt mogelijk een tool of denkt verder na...
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
 
