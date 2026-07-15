@@ -41,20 +41,22 @@ async function consolidateKenmerken() {
     for (const current of rows) {
       if (processedIds.has(current.id)) continue;
       
-      // Find similar traits (cosine similarity > 0.75)
+      // Find similar traits (cosine similarity > 0.75) — scoped to the same
+      // categorie so an "algemeen" fact never merges into a "persona" trait
+      // (or vice versa) just because their embeddings happen to be close.
       const { rows: matches } = await pool.query(
-        `SELECT id, kenmerk, status, zekerheid, bron_object_ids, soort, 1 - (embedding <=> $1) AS similarity
+        `SELECT id, kenmerk, status, zekerheid, bron_object_ids, soort, categorie, 1 - (embedding <=> $1) AS similarity
          FROM persona_kenmerk
-         WHERE id != $2 AND embedding IS NOT NULL AND status != 'rejected' AND (1 - (embedding <=> $1)) > 0.75`,
-        [current.embedding, current.id]
+         WHERE id != $2 AND embedding IS NOT NULL AND status != 'rejected' AND categorie = $3 AND (1 - (embedding <=> $1)) > 0.75`,
+        [current.embedding, current.id, current.categorie]
       );
-      
+
       if (matches.length > 0) {
         console.log(`[Consolidator] Consolidating duplicates for: "${current.kenmerk}"`);
         let mergedBronObjectIds = [...current.bron_object_ids];
         let highestStatus = current.status;
         let highestZekerheid = current.zekerheid;
-        let isFeit = current.soort === "feit";
+        let isFeit = current.soort === "feit" || current.categorie === "algemeen";
         
         const statusWeight = { observation: 1, hypothesis: 2, confirmed: 3, rejected: 0 };
         

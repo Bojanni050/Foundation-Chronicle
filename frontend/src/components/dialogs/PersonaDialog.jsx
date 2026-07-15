@@ -13,6 +13,65 @@ import {
   reflecteerOverTijd,
 } from "@/services/personaSync";
 
+// Shared row for both persona traits and "algemeen" facts — the only
+// difference is the soort badge, which is null/meaningless for "algemeen"
+// (see db/schema.ts's kennis.soort comment).
+function KenmerkRow({ k, instelling, onConfirm, onReject }) {
+  const usable = magGebruiktWorden(k, instelling);
+  const needsConfirm = k.gevoelig && !usable && k.zekerheid >= instelling.confidence_threshold;
+  return (
+    <li
+      data-testid={`persona-item-${k.id}`}
+      className="rounded-lg bg-accent/50 px-3 py-2.5 text-sm text-ink font-sans"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span>
+          {k.soort && (
+            <span
+              data-testid={`persona-soort-${k.id}`}
+              className="mr-1.5 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-primary font-medium"
+            >
+              {k.soort}
+            </span>
+          )}
+          {k.kenmerk}
+        </span>
+        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">
+          {k.zekerheid}%
+        </span>
+      </div>
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted-foreground/70">
+          {k.status}
+          {usable && k.status !== "confirmed" ? " · above threshold" : ""}
+          {needsConfirm ? " · sensitive, needs confirmation" : ""} ·{" "}
+          {k.bron_object_ids.length} source{k.bron_object_ids.length === 1 ? "" : "s"}
+        </span>
+        {k.status !== "confirmed" && (
+          <div className="flex shrink-0 gap-1">
+            <button
+              onClick={() => onConfirm(k.id)}
+              data-testid={`persona-confirm-${k.id}`}
+              title="Confirm"
+              className="rounded p-1 text-primary hover:bg-primary/10"
+            >
+              <Check className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => onReject(k.id)}
+              data-testid={`persona-reject-${k.id}`}
+              title="Reject"
+              className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
 function InstellingField({ label, hint, value, onChange, min, max }) {
   return (
     <label className="flex items-center justify-between gap-3 text-xs">
@@ -113,8 +172,14 @@ export function PersonaDialog({ open, onOpenChange }) {
   };
 
   const kenmerken = state?.kenmerken || [];
-  const currentTraits = kenmerken.filter((k) => !k.valid_to);
-  
+  const currentTraits = kenmerken.filter((k) => !k.valid_to && k.categorie !== "algemeen");
+  // "algemeen" candidates are facts/concepts from content, not claims about
+  // the owner — same observation → confirm/reject flow as persona traits
+  // (server/routes/persona/kenmerken.js scopes dedup/reinforcement by
+  // categorie so the two never cross-pollinate), just shown in their own
+  // section so they don't read as personality judgments.
+  const algemeneFeiten = kenmerken.filter((k) => !k.valid_to && k.categorie === "algemeen");
+
   const historyTraits = allTraits.filter(
     (k) => k.valid_to || (k.status === "rejected" && k.vervangen_door)
   );
@@ -165,67 +230,32 @@ export function PersonaDialog({ open, onOpenChange }) {
               Can't reach the local server — run <code>npm run server</code> to use Persona.
             </p>
           ) : tab === "current" ? (
-            currentTraits.length === 0 ? (
+            currentTraits.length === 0 && algemeneFeiten.length === 0 ? (
               <p className="text-sm text-muted-foreground py-6 text-center">
                 Nothing learned yet. Detect patterns to get started.
               </p>
             ) : (
-              <ul className="space-y-2.5 max-h-80 overflow-y-auto" data-testid="persona-list">
-                {currentTraits.map((k) => {
-                  const usable = magGebruiktWorden(k, state.instelling);
-                  const needsConfirm = k.gevoelig && !usable && k.zekerheid >= state.instelling.confidence_threshold;
-                  return (
-                    <li
-                      key={k.id}
-                      data-testid={`persona-item-${k.id}`}
-                      className="rounded-lg bg-accent/50 px-3 py-2.5 text-sm text-ink font-sans"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span>
-                          <span
-                            data-testid={`persona-soort-${k.id}`}
-                            className="mr-1.5 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-primary font-medium"
-                          >
-                            {k.soort}
-                          </span>
-                          {k.kenmerk}
-                        </span>
-                        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">
-                          {k.zekerheid}%
-                        </span>
-                      </div>
-                      <div className="mt-1.5 flex items-center justify-between gap-2">
-                        <span className="text-[11px] text-muted-foreground/70">
-                          {k.status}
-                          {usable && k.status !== "confirmed" ? " · above threshold" : ""}
-                          {needsConfirm ? " · sensitive, needs confirmation" : ""} ·{" "}
-                          {k.bron_object_ids.length} source{k.bron_object_ids.length === 1 ? "" : "s"}
-                        </span>
-                        {k.status !== "confirmed" && (
-                          <div className="flex shrink-0 gap-1">
-                            <button
-                              onClick={() => confirm(k.id)}
-                              data-testid={`persona-confirm-${k.id}`}
-                              title="Confirm"
-                              className="rounded p-1 text-primary hover:bg-primary/10"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => reject(k.id)}
-                              data-testid={`persona-reject-${k.id}`}
-                              title="Reject"
-                              className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+              <div className="space-y-4">
+                {currentTraits.length > 0 && (
+                  <ul className="space-y-2.5 max-h-80 overflow-y-auto" data-testid="persona-list">
+                    {currentTraits.map((k) => (
+                      <KenmerkRow key={k.id} k={k} instelling={state.instelling} onConfirm={confirm} onReject={reject} />
+                    ))}
+                  </ul>
+                )}
+                {algemeneFeiten.length > 0 && (
+                  <div>
+                    <p className="pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                      Algemene feiten
+                    </p>
+                    <ul className="space-y-2.5 max-h-80 overflow-y-auto" data-testid="algemeen-list">
+                      {algemeneFeiten.map((k) => (
+                        <KenmerkRow key={k.id} k={k} instelling={state.instelling} onConfirm={confirm} onReject={reject} />
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
             )
           ) : (
             historyTraits.length === 0 ? (

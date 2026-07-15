@@ -24,9 +24,12 @@ router.get("/kenmerken", async (req, res) => {
 
 // POST /api/persona/kenmerken
 router.post("/kenmerken", async (req, res) => {
-  const { kenmerk, bronObjectId, soort, gevoelig } = req.body || {};
+  const { kenmerk, bronObjectId, soort, gevoelig, categorie } = req.body || {};
   if (!kenmerk || !bronObjectId) return res.status(400).json({ error: "kenmerk and bronObjectId required" });
-  const soortValue = soort === "feit" ? "feit" : "patroon";
+  // "algemeen" (a fact/concept from content, not a claim about the owner)
+  // has no soort — that field is only meaningful for categorie "persona".
+  const categorieValue = categorie === "algemeen" || categorie === "skill" ? categorie : "persona";
+  const soortValue = categorieValue === "algemeen" ? null : (soort === "feit" ? "feit" : "patroon");
 
   // 1. Generate local embedding
   let embeddingLiteral = null;
@@ -37,15 +40,19 @@ router.post("/kenmerken", async (req, res) => {
   }
 
   // 2. Perform vector duplicate detection if embedding is available
+  // Scoped to the same categorie — an "algemeen" fact about e.g. a WordPress
+  // plugin must never reinforce or merge into a "persona" trait just because
+  // their embeddings happen to be similar; the two are different kinds of
+  // record entirely, only sharing a table for storage convenience.
   if (embeddingLiteral) {
     try {
       const { rows: matches } = await pool.query(
         `SELECT *, 1 - (embedding <=> $1) AS similarity
          FROM persona_kenmerk
-         WHERE embedding IS NOT NULL AND status != 'rejected'
+         WHERE embedding IS NOT NULL AND status != 'rejected' AND categorie = $2
          ORDER BY embedding <=> $1
          LIMIT 1`,
-        [embeddingLiteral]
+        [embeddingLiteral, categorieValue]
       );
       const bestMatch = matches[0];
       if (bestMatch && bestMatch.similarity > 0.82) {
@@ -58,7 +65,8 @@ router.post("/kenmerken", async (req, res) => {
           bronObjectIds,
           instelling.promotie_min_bronnen,
           bestMatch.status,
-          bestMatch.soort
+          bestMatch.soort,
+          bestMatch.categorie
         );
         const { rows } = await pool.query(
           `UPDATE persona_kenmerk SET bron_object_ids = $1, zekerheid = $2, status = $3, laatst_versterkt_op = now()
@@ -83,10 +91,10 @@ router.post("/kenmerken", async (req, res) => {
       const { rows: rejectedMatches } = await pool.query(
         `SELECT *, 1 - (embedding <=> $1) AS similarity
          FROM persona_kenmerk
-         WHERE embedding IS NOT NULL AND status = 'rejected' AND verwerp_bron = 'mens'
+         WHERE embedding IS NOT NULL AND status = 'rejected' AND verwerp_bron = 'mens' AND categorie = $2
          ORDER BY embedding <=> $1
          LIMIT 1`,
-        [embeddingLiteral]
+        [embeddingLiteral, categorieValue]
       );
       const rejectedMatch = rejectedMatches[0];
       if (rejectedMatch && rejectedMatch.similarity > 0.82 && !rejectedMatch.bron_object_ids.includes(bronObjectId)) {
@@ -103,13 +111,14 @@ router.post("/kenmerken", async (req, res) => {
           mergedBronObjectIds,
           instelling.promotie_min_bronnen,
           "hypothesis",
-          rejectedMatch.soort
+          rejectedMatch.soort,
+          rejectedMatch.categorie
         );
         const { rows } = await pool.query(
           `INSERT INTO persona_kenmerk
-             (kenmerk, bron_object_ids, zekerheid, status, soort, gevoelig, embedding, voorganger_id)
-           VALUES ($1, $2, $3, 'hypothesis', $4, true, $5, $6) RETURNING *`,
-          [rejectedMatch.kenmerk, mergedBronObjectIds, zekerheid, rejectedMatch.soort, embeddingLiteral, rejectedMatch.id]
+             (kenmerk, categorie, bron_object_ids, zekerheid, status, soort, gevoelig, embedding, voorganger_id)
+           VALUES ($1, $2, $3, $4, 'hypothesis', $5, true, $6, $7) RETURNING *`,
+          [rejectedMatch.kenmerk, rejectedMatch.categorie, mergedBronObjectIds, zekerheid, rejectedMatch.soort, embeddingLiteral, rejectedMatch.id]
         );
         return res.status(201).json({ ...rows[0], resurrected: true });
       }
@@ -124,13 +133,14 @@ router.post("/kenmerken", async (req, res) => {
     [bronObjectId],
     instelling.promotie_min_bronnen,
     "observation",
-    soortValue
+    soortValue,
+    categorieValue
   );
 
   const { rows } = await pool.query(
-    `INSERT INTO persona_kenmerk (kenmerk, bron_object_ids, zekerheid, status, soort, gevoelig, embedding)
-     VALUES ($1, ARRAY[$2], $3, $4, $5, $6, $7) RETURNING *`,
-    [kenmerk, bronObjectId, zekerheid, status, soortValue, !!gevoelig, embeddingLiteral]
+    `INSERT INTO persona_kenmerk (kenmerk, categorie, bron_object_ids, zekerheid, status, soort, gevoelig, embedding)
+     VALUES ($1, $2, ARRAY[$3], $4, $5, $6, $7, $8) RETURNING *`,
+    [kenmerk, categorieValue, bronObjectId, zekerheid, status, soortValue, !!gevoelig, embeddingLiteral]
   );
 
   // Trigger consolidator in the background to handle instant duplicate merging
@@ -170,7 +180,8 @@ router.patch("/kenmerken/:id/versterk", async (req, res) => {
     bronObjectIds,
     instelling.promotie_min_bronnen,
     kenmerk.status,
-    kenmerk.soort
+    kenmerk.soort,
+    kenmerk.categorie
   );
   try {
     await assertStatusChangeAllowed(pool, "persona_kenmerk", req.params.id, status);
@@ -249,7 +260,8 @@ router.patch("/kenmerken/:id/samenvoegen", async (req, res) => {
     mergedBronIds,
     instelling.promotie_min_bronnen,
     winner.status,
-    winner.soort
+    winner.soort,
+    winner.categorie
   );
 
   try {

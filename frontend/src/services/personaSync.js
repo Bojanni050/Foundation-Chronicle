@@ -28,31 +28,14 @@ export async function fetchAlleKenmerken() {
   }
 }
 
-async function createKenmerk(apiUrl, kenmerk, bronObjectId, soort, gevoelig) {
+async function createKenmerk(apiUrl, kenmerk, bronObjectId, soort, gevoelig, categorie) {
   const res = await fetch(`${apiUrl}/api/persona/kenmerken`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kenmerk, bronObjectId, soort, gevoelig }),
+    body: JSON.stringify({ kenmerk, bronObjectId, soort, gevoelig, categorie }),
   });
   if (!res.ok) throw new Error("PERSONA_API_ERROR");
   return res.json();
-}
-
-/**
- * A "categorie: algemeen" candidate is a fact/concept from content, not a
- * claim about the owner — it doesn't need persona_kenmerk's trust ladder,
- * just a plain, searchable "kennis" object, linked back to its source via
- * the same `links` field ObjectDetail already shows.
- */
-export async function createKennisObject(kenmerk, bronObjectId) {
-  return objectRepository.create({
-    type: "note",
-    title: kenmerk.length > 80 ? kenmerk.slice(0, 77) + "..." : kenmerk,
-    content: kenmerk,
-    tags: ["ai-extracted"],
-    source: "ai",
-    links: bronObjectId ? [bronObjectId] : [],
-  });
 }
 
 async function versterkKenmerk(apiUrl, id, bronObjectId) {
@@ -197,10 +180,15 @@ export async function detectPersonaKenmerken(limit = 30) {
     for (const c of candidates) {
       if (!c?.kenmerk || !c?.bronObjectId) continue;
       try {
+        // Server handles duplicate detection and automatically reinforces if
+        // match is found. "algemeen" candidates (a fact/concept from content,
+        // not a claim about the owner) go through the same observation →
+        // confirm/reject flow as persona traits instead of being written
+        // straight into the user's notes — see PersonaDialog's "Algemene
+        // feiten" section.
         if (c.categorie === "algemeen") {
-          await createKennisObject(c.kenmerk, c.bronObjectId);
+          await createKenmerk(apiUrl, c.kenmerk, c.bronObjectId, null, false, "algemeen");
         } else {
-          // Server handles duplicate detection and automatically reinforces if match is found
           await createKenmerk(apiUrl, c.kenmerk, c.bronObjectId, c.soort, c.gevoelig);
         }
         processed += 1;
