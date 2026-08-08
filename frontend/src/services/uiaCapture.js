@@ -34,11 +34,52 @@ const SYSTEM_CHROME_PATTERNS = [
   "Control Panel",
   "System Properties",
   "Nvidia",
-].map((p) => p.toLowerCase());
+];
 
-function isSystemChrome(appName, windowTitle) {
+// Different reason to exclude than SYSTEM_CHROME_PATTERNS above — this isn't
+// about noise, it's about never capturing content the person has actively
+// signaled should stay private (a private/incognito browser tab, a password
+// manager's vault, screen-recording tools whose own output shouldn't get
+// recursively captured). Same screenpipe defaults (apps/screenpipe-app-
+// tauri/src-tauri/src/store.rs's all-OS ignored_windows) this list is based
+// on, adapted after testing turned up real false positives: bare "Private"
+// also matched "GitHub - private repo settings" (an ordinary English word,
+// not a signal), so this uses "InPrivate" — Edge's actual mode name, which
+// still contains "private" for anyone matching loosely but isn't itself a
+// common substring of unrelated titles.
+const PRIVACY_PATTERNS = [
+  "Incognito",
+  "InPrivate",
+  "Bitwarden",
+  "Keepass",
+  "vault",
+  "OBS Studio",
+  "Recorder",
+];
+
+const EXCLUDED_CAPTURE_PATTERNS = [...SYSTEM_CHROME_PATTERNS, ...PRIVACY_PATTERNS].map((p) => p.toLowerCase());
+
+// Chronicle's own window — the direct analog of screenpipe's own
+// self-exclusion (their "screenpipe" entry in the same default list). Kept
+// separate from the substring patterns above and checked only against
+// appName, not the combined title: a loose "chronicle" substring match
+// against the title also caught "GaiaChat.jsx - Foundation-Chronicle" in
+// testing (VS Code, just because the project folder is named Chronicle) —
+// exactly the kind of false positive that would've silently blocked all
+// coding activity on this very repo. tauri.conf.json's productName is
+// "Chronicle", so Tauri names the executable Chronicle.exe.
+const CHRONICLE_EXE_NAME = "chronicle.exe";
+
+// Exported for uiaCapture.test.js — a plain substring match against
+// arbitrary window titles is exactly the kind of thing that silently grows
+// a new false positive the next time someone adds a pattern (as "Private"
+// and "Chronicle" already did once — see the comments above). A checked-in
+// regression test is what actually prevents that going forward; eyeballing
+// a one-off Node script each time does not.
+export function isExcludedFromCapture(appName, windowTitle) {
+  if ((appName || "").toLowerCase() === CHRONICLE_EXE_NAME) return true;
   const haystack = `${appName} ${windowTitle}`.toLowerCase();
-  return SYSTEM_CHROME_PATTERNS.some((pattern) => haystack.includes(pattern));
+  return EXCLUDED_CAPTURE_PATTERNS.some((pattern) => haystack.includes(pattern));
 }
 
 // Consecutive captures of the same app/window accumulate into one growing
@@ -150,7 +191,7 @@ async function flushPending() {
 async function handleCapture(payload) {
   const appName = payload.app_name || "unknown";
   const windowTitle = payload.window_title || "";
-  if (isSystemChrome(appName, windowTitle)) return;
+  if (isExcludedFromCapture(appName, windowTitle)) return;
   const newLines = Array.isArray(payload.captured_text) ? payload.captured_text : [];
 
   const sameSession = currentSession?.appName === appName && currentSession?.windowTitle === windowTitle;
