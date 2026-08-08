@@ -8,6 +8,39 @@
 // means capture code only ever needs one contract: "queue it."
 import { getSettings } from "@/lib/settings";
 
+// OS chrome — system-tray flyouts, lock screen, task manager, etc. — has no
+// personal-knowledge value and was showing up as real activity objects
+// (e.g. "The system volume was muted", "Clock shows 02:37" from
+// ShellHost.exe, the Windows 11 Quick Settings/Action Center host). Every
+// one of those becomes a real object the 30-min maintenance cycle's
+// detection pipelines have to triage, so it's worth skipping before the
+// capture is ever queued rather than filtering it out downstream in every
+// consumer. Windows entries here mirror screenpipe's own proven
+// ignored_windows defaults (github.com/screenpipe/screenpipe,
+// apps/screenpipe-app-tauri/src-tauri/src/store.rs) plus ShellHost.exe,
+// confirmed directly from this app's own Capture log. Matched case-
+// insensitively as a substring against both app name and window title —
+// same convention screenpipe uses, since a process can surface either.
+const SYSTEM_CHROME_PATTERNS = [
+  "ShellHost.exe",
+  "ShellExperienceHost.exe",
+  "SearchHost.exe",
+  "StartMenuExperienceHost.exe",
+  "TextInputHost.exe",
+  "LockApp.exe",
+  "PickerHost.exe",
+  "Taskmgr.exe",
+  "SnippingTool.exe",
+  "Control Panel",
+  "System Properties",
+  "Nvidia",
+].map((p) => p.toLowerCase());
+
+function isSystemChrome(appName, windowTitle) {
+  const haystack = `${appName} ${windowTitle}`.toLowerCase();
+  return SYSTEM_CHROME_PATTERNS.some((pattern) => haystack.includes(pattern));
+}
+
 // Consecutive captures of the same app/window accumulate into one growing
 // object instead of spawning a new one every 30s refresh — mirrors
 // purememoryIngest.js's groupByFocusSession idea (one object per focus
@@ -117,6 +150,7 @@ async function flushPending() {
 async function handleCapture(payload) {
   const appName = payload.app_name || "unknown";
   const windowTitle = payload.window_title || "";
+  if (isSystemChrome(appName, windowTitle)) return;
   const newLines = Array.isArray(payload.captured_text) ? payload.captured_text : [];
 
   const sameSession = currentSession?.appName === appName && currentSession?.windowTitle === windowTitle;
