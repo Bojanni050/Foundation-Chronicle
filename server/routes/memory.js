@@ -444,6 +444,58 @@ router.get("/facts", async (req, res) => {
   res.json(rows);
 });
 
+// POST /api/memory/facts/relevant — active facts semantically close to the
+// given texts (e.g. recently captured episode fragments), for temporal
+// reflection (services/hypothesisReflectionSync.js). Reflection needs to
+// compare new material against *some* existing facts to spot a contradiction
+// or an update — but sending literally every active fact on every run grows
+// unbounded forever. This does the same join as GET /search (fact shares its
+// confirming hypothesis's embedding — buildFactFromHypothesis copies the
+// text verbatim, so a second embed() call would just duplicate the vector),
+// but per-text top-K, unioned and deduped, so only what's plausibly on-topic
+// reaches the (paid) reflection LLM call. Purely a local embedding + Postgres
+// query — no LLM cost of its own.
+router.post("/facts/relevant", async (req, res) => {
+  const { texts, limit } = req.body || {};
+  if (!Array.isArray(texts) || texts.length === 0) {
+    return res.status(400).json({ error: "texts (non-empty array) required" });
+  }
+  // Defensive cap — an unusually large batch of new episodes in one cycle
+  // still costs at most this many local embed() calls, not unbounded.
+  const boundedTexts = texts.slice(0, 50);
+  const perTextLimit = Math.min(parseInt(limit, 10) || 10, 25);
+
+  const byId = new Map();
+  for (const text of boundedTexts) {
+    if (!text || typeof text !== "string") continue;
+    let embeddingLiteral;
+    try {
+      embeddingLiteral = `[${(await embed(text)).join(",")}]`;
+    } catch (err) {
+      return res.status(503).json({ error: "local embedding unavailable: " + err.message });
+    }
+    const { rows } = await pool.query(
+      `SELECT f.*, 1 - (h.embedding <=> $1) AS semantic_relevance
+       FROM fact f
+       JOIN hypothesis h ON h.id = f.hypothesis_id
+       WHERE h.embedding IS NOT NULL
+         AND f.id NOT IN (SELECT supersedes_fact_id FROM fact WHERE supersedes_fact_id IS NOT NULL)
+       ORDER BY h.embedding <=> $1
+       LIMIT $2`,
+      [embeddingLiteral, perTextLimit]
+    );
+    for (const row of rows) {
+      const existing = byId.get(row.id);
+      if (!existing || row.semantic_relevance > existing.semantic_relevance) {
+        byId.set(row.id, row);
+      }
+    }
+  }
+
+  const merged = [...byId.values()].sort((a, b) => b.semantic_relevance - a.semantic_relevance);
+  res.json(merged);
+});
+
 // POST /api/memory/hypotheses/:id/evidence — interpret one frozen episode
 // for this hypothesis. Observation/provenance fields are never accepted here.
 // Never touches hypothesis.status: adding evidence, however conclusive,

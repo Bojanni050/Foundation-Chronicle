@@ -62,6 +62,18 @@ export function listFacts({ active } = {}) {
   return memoryRequest(`/facts${query}`);
 }
 
+// Active facts semantically close to `texts` (e.g. recent episode
+// fragments) — the bounded alternative to listFacts({active: true}) for
+// hypothesisReflectionSync.js's automatic reflection pass, which would
+// otherwise resend every active fact on every run forever. Local embedding +
+// pgvector query server-side, no LLM cost of its own.
+export function listRelevantFacts(texts, { limit } = {}) {
+  return memoryRequest("/facts/relevant", {
+    method: "POST",
+    body: JSON.stringify({ texts, limit }),
+  });
+}
+
 // Episodes captured since `sinceIso` (all of them if omitted) — recent raw
 // observations for the reflection pipeline to weigh against active facts.
 export function listEpisodesSince(sinceIso) {

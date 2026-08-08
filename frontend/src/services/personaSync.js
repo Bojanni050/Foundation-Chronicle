@@ -28,6 +28,24 @@ export async function fetchAlleKenmerken() {
   }
 }
 
+// Non-rejected kenmerken semantically close to `texts` — the bounded
+// alternative to fetchAlleKenmerken() for the automatic reflection pass
+// (reflecteerOverTijd below, when called with sinceIso). The full kenmerken
+// list only grows over time; resending literally all of it on every
+// automatic run would make this pipeline's cost climb without bound. Local
+// embed() + Postgres query server-side, no LLM cost of its own.
+async function fetchRelevanteKenmerken(texts, limit) {
+  const { apiUrl } = getSettings();
+  if (!apiUrl || !texts.length) return [];
+  const res = await fetch(`${apiUrl}/api/persona/kenmerken/relevant`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts, limit }),
+  });
+  if (!res.ok) throw new Error("PERSONA_API_ERROR");
+  return res.json();
+}
+
 async function createKenmerk(apiUrl, kenmerk, bronObjectId, soort, gevoelig, categorie) {
   const res = await fetch(`${apiUrl}/api/persona/kenmerken`, {
     method: "POST",
@@ -227,10 +245,7 @@ export async function reflecteerOverTijd(sinceIso) {
   const { apiUrl } = getSettings();
   if (!apiUrl || !AIService.isConfigured()) return { success: false, reason: "NOT_CONFIGURED" };
   try {
-    const [allTraits, allObjects] = await Promise.all([
-      fetchAlleKenmerken(),
-      objectRepository.list()
-    ]);
+    const allObjects = await objectRepository.list();
 
     // 1. Filter objects that have temporal metadata
     let temporalObjects = allObjects.filter(
@@ -251,8 +266,19 @@ export async function reflecteerOverTijd(sinceIso) {
       return dateA.localeCompare(dateB);
     });
 
+    // The automatic background pass (sinceIso set) only compares against
+    // kenmerken plausibly related to what's newly in scope — otherwise this
+    // resends the entire, ever-growing kenmerken list every run. The manual
+    // "Temporal reflection" button (no sinceIso) intentionally still does a
+    // full scan, since exhaustiveness is exactly what clicking it asks for.
+    const relevantTraits = sinceIso
+      ? await fetchRelevanteKenmerken(
+          temporalObjects.map((o) => `${o.title || ""} ${(o.content || "").slice(0, 300)}`.trim())
+        )
+      : await fetchAlleKenmerken();
+
     // 3. Call LLM to reflect on timeline and identify changes
-    const reflections = await AIService.reflectTemporalBeliefs(allTraits, temporalObjects);
+    const reflections = await AIService.reflectTemporalBeliefs(relevantTraits, temporalObjects);
     if (!reflections || reflections.length === 0) {
       return { success: true, reflectionsCount: 0 };
     }
@@ -295,20 +321,30 @@ const LAST_AUTO_REFLECTION_KEY = "chronicle_last_auto_temporal_reflection_at";
  * there's nothing new, so the actual cadence naturally lands somewhere
  * between "every tick" and "only after a burst of new material", without
  * this function needing its own separate scheduling logic.
+ *
+ * `includeReflection` lets the caller run detection every tick while running
+ * reflection on a slower cadence of its own — App.js does this so a fresh
+ * import gets tagged promptly without paying for a temporal-reflection LLM
+ * call (which, even with the relevance prefilter above, is still real work)
+ * every single tick.
  */
-export async function runAutomaticPersonaMaintenance() {
+export async function runAutomaticPersonaMaintenance({ includeReflection = true } = {}) {
   if (!AIService.isConfigured()) return { detected: 0, reflected: 0 };
 
   const detected = await detectPersonaKenmerken();
 
-  const sinceIso = localStorage.getItem(LAST_AUTO_REFLECTION_KEY) || undefined;
-  const res = await reflecteerOverTijd(sinceIso);
-  if (res.success) {
-    localStorage.setItem(LAST_AUTO_REFLECTION_KEY, new Date().toISOString());
+  let reflected = 0;
+  if (includeReflection) {
+    const sinceIso = localStorage.getItem(LAST_AUTO_REFLECTION_KEY) || undefined;
+    const res = await reflecteerOverTijd(sinceIso);
+    if (res.success) {
+      localStorage.setItem(LAST_AUTO_REFLECTION_KEY, new Date().toISOString());
+      reflected = res.reflectionsCount > 0 ? res.reflectionsCount : 0;
+    }
   }
 
   return {
     detected: typeof detected === "number" && detected > 0 ? detected : 0,
-    reflected: res.success && res.reflectionsCount > 0 ? res.reflectionsCount : 0,
+    reflected,
   };
 }

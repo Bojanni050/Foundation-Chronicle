@@ -22,6 +22,54 @@ router.get("/kenmerken", async (req, res) => {
   res.json(rows);
 });
 
+// POST /api/persona/kenmerken/relevant — non-rejected kenmerken semantically
+// close to the given texts (recently captured temporal objects), for
+// personaSync.js's automatic temporal reflection. Same reasoning as
+// server/routes/memory.js's POST /facts/relevant: reflection needs to
+// compare new material against *some* existing kenmerken, but resending
+// every kenmerk on every automatic run grows the prompt unboundedly. Local
+// embedding + Postgres query only — no LLM cost. The manual "Temporal
+// reflection" button in PersonaDialog intentionally still does a full scan
+// (fetchAlleKenmerken) — this endpoint is only for the recurring automatic
+// path, where cost actually accumulates. Registered before POST /kenmerken
+// so the literal "/relevant" segment isn't swallowed by :id-style matching.
+router.post("/kenmerken/relevant", async (req, res) => {
+  const { texts, limit } = req.body || {};
+  if (!Array.isArray(texts) || texts.length === 0) {
+    return res.status(400).json({ error: "texts (non-empty array) required" });
+  }
+  const boundedTexts = texts.slice(0, 50);
+  const perTextLimit = Math.min(parseInt(limit, 10) || 10, 25);
+
+  const byId = new Map();
+  for (const text of boundedTexts) {
+    if (!text || typeof text !== "string") continue;
+    let embeddingLiteral;
+    try {
+      embeddingLiteral = `[${(await embed(text)).join(",")}]`;
+    } catch (err) {
+      return res.status(503).json({ error: "local embedding unavailable: " + err.message });
+    }
+    const { rows } = await pool.query(
+      `SELECT *, 1 - (embedding <=> $1) AS semantic_relevance
+       FROM persona_kenmerk
+       WHERE embedding IS NOT NULL AND status != 'rejected'
+       ORDER BY embedding <=> $1
+       LIMIT $2`,
+      [embeddingLiteral, perTextLimit]
+    );
+    for (const row of rows) {
+      const existing = byId.get(row.id);
+      if (!existing || row.semantic_relevance > existing.semantic_relevance) {
+        byId.set(row.id, row);
+      }
+    }
+  }
+
+  const merged = [...byId.values()].sort((a, b) => b.semantic_relevance - a.semantic_relevance);
+  res.json(merged);
+});
+
 // POST /api/persona/kenmerken
 router.post("/kenmerken", async (req, res) => {
   const { kenmerk, bronObjectId, soort, gevoelig, categorie } = req.body || {};

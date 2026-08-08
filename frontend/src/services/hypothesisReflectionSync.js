@@ -8,8 +8,14 @@
 // hypothesis via the normal createHypothesis path, carrying supersedesFactId
 // so a human's later explicit confirmation (not this job) is what actually
 // supersedes the old fact. Nothing here ever calls confirmHypothesis.
+//
+// Facts to compare against are fetched via listRelevantFacts (embedding
+// similarity to the new episodes), not listFacts({active:true}) — the full
+// active-fact set only grows over time, and resending literally all of it on
+// every automatic run would make this pipeline's cost climb without bound.
+// The similarity fetch is a local embed() + Postgres query, not an LLM call.
 import { AIService } from "@/services/AIService";
-import { listFacts, listEpisodesSince, createHypothesis, MemoryApiError } from "@/services/memoryApi";
+import { listRelevantFacts, listEpisodesSince, createHypothesis, MemoryApiError } from "@/services/memoryApi";
 
 const ALLOWED_CLASSIFICATIONS = ["echte_wijziging", "echte_contradictie"];
 
@@ -37,15 +43,21 @@ const LAST_REFLECTION_KEY = "chronicle_last_hypothesis_reflection_at";
 export async function reflectOnHypotheses() {
   if (!AIService.isConfigured()) return -1;
   try {
-    const activeFacts = await listFacts({ active: true });
-    if (!activeFacts.length) return 0; // nothing yet to reflect on
-
     const sinceIso = localStorage.getItem(LAST_REFLECTION_KEY) || undefined;
     const recentEpisodes = await listEpisodesSince(sinceIso);
     if (!recentEpisodes.length) return 0;
 
-    const candidates = await AIService.reflectOnFacts(activeFacts, recentEpisodes);
-    const activeFactIds = new Set(activeFacts.map((f) => f.id));
+    const relevantFacts = await listRelevantFacts(recentEpisodes.map((e) => e.fragment));
+    if (!relevantFacts.length) {
+      // Looked at these episodes, found nothing on-topic to compare them
+      // against — still real progress, so advance the watermark instead of
+      // re-embedding the same episodes again next cycle for no reason.
+      localStorage.setItem(LAST_REFLECTION_KEY, new Date().toISOString());
+      return 0;
+    }
+
+    const candidates = await AIService.reflectOnFacts(relevantFacts, recentEpisodes);
+    const activeFactIds = new Set(relevantFacts.map((f) => f.id));
 
     let processed = 0;
     for (const c of candidates) {

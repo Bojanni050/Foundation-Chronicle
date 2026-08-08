@@ -100,22 +100,28 @@ export default function App() {
   }, [sync]);
 
   // Automatic persona pattern detection + temporal reflection — the
-  // background counterpart to PersonaDialog's manual buttons. Both
-  // underlying calls are self-gating (detection skips objects it's already
-  // scanned, reflection skips objects unchanged since the last automatic
-  // pass), so an LLM call only actually happens when there's real new
-  // material — no separate "N new objects" burst counter needed on top.
-  // 30 min keeps a bulk import from sitting unprocessed for too long
-  // without re-running often enough to matter when nothing's changed.
+  // background counterpart to PersonaDialog's manual buttons. Detection
+  // calls are self-gating (skip objects already scanned) and run every
+  // tick — 30 min keeps a bulk import from sitting unprocessed for too long.
+  // Reflection (personaSync's reflecteerOverTijd, hypothesisReflectionSync's
+  // reflectOnHypotheses) runs on its own slower cadence — REFLECTION_EVERY_N_
+  // TICKS — even with the embedding-based relevance prefilter narrowing what
+  // each call sends, it's still a real LLM call, and drift-checking doesn't
+  // need to happen as often as picking up freshly imported content does.
+  const maintenanceTickRef = useRef(0);
   useEffect(() => {
+    const REFLECTION_EVERY_N_TICKS = 4; // 30min * 4 = every 2h
     const run = async () => {
+      const tick = maintenanceTickRef.current++;
+      const includeReflection = tick % REFLECTION_EVERY_N_TICKS === 0;
+
       // Runs first: tags personaRelevant/hypothesisRelevant on new/changed
       // objects with one cheap classification call, so the two heavier
       // extraction passes below skip content already ruled out instead of
       // each independently re-deciding relevance via their own full scan.
       await runDistributor();
 
-      const { detected, reflected } = await runAutomaticPersonaMaintenance();
+      const { detected, reflected } = await runAutomaticPersonaMaintenance({ includeReflection });
       if (detected > 0 || reflected > 0) {
         const parts = [];
         if (detected > 0) parts.push(`${detected} new pattern${detected === 1 ? "" : "s"}`);
@@ -133,9 +139,11 @@ export default function App() {
       // Reflection only ever proposes a new, "open" hypothesis (carrying
       // supersedesFactId) — it never confirms one itself, so this can run
       // freely in the same cycle without touching any existing fact.
-      const reflectionsProposed = await reflectOnHypotheses();
-      if (reflectionsProposed > 0) {
-        toast.success(`Memory reflection: ${reflectionsProposed} possible change${reflectionsProposed === 1 ? "" : "s"} to review`);
+      if (includeReflection) {
+        const reflectionsProposed = await reflectOnHypotheses();
+        if (reflectionsProposed > 0) {
+          toast.success(`Memory reflection: ${reflectionsProposed} possible change${reflectionsProposed === 1 ? "" : "s"} to review`);
+        }
       }
     };
     const id = setInterval(run, 30 * 60 * 1000);
