@@ -27,6 +27,20 @@ Bij elke nieuwe feature, vóór je begint te bouwen:
   kapot gaat → prima, mag blijven, maar wordt nooit een randvoorwaarde
   voor de kernloop.
 
+## Verhouding tot Hindsight (toegevoegd 6 september 2026)
+
+Chronicle is **geen** concurrerende geheugenlaag voor Hermes. Hindsight
+vervult die rol al in productie (recall/retain/reflect, hypothese-tracking,
+sinds 23 augustus 2026). Een eerder ontwerp (`docs/hermes-chronicle-integratie.md`)
+beschreef Chronicle als eigen Hermes memory-provider
+(`chronicle_recall`/`retain`/`reflect`/`hypothesize`) — dat spoor is
+losgelaten. Chronicle's rol is smaller en concreter: een **ruw archief**
+voor content die buiten Gaia/Hermes ontstaat (externe AI-tools, browsers,
+documenten), met een MCP-ingang zodat Gaia het kan bevragen. Ruwe tekst
+gaat nooit rechtstreeks Hindsight in — alleen bevestigde, gedistilleerde
+feiten gaan via `sync_retain` naar Hindsight, net als bij Gaia's eigen
+gesprekken.
+
 ## Huidige indeling (stand 13 juli 2026)
 
 **Kern — registreren**
@@ -57,3 +71,17 @@ vast anker lag. Dit document is dat anker.
 Foundation-Chronicle (deze repo) is de actieve versie. De andere vier
 mappen zijn eerdere iteraties — behandel ze als archief, niet als basis
 om vanuit verder te bouwen.
+
+**Update 6 september 2026**: er bleek een zesde, feitelijk de ÁLLEREERSTE
+iteratie te bestaan — gebouwd in Google AI Studio, vóór alle hierboven
+genoemde mappen, teruggevonden in een lokale zip en ondergebracht in
+[`chronicle-archive`](https://github.com/Bojanni050/chronicle-archive)
+(privé). Ook dit is archief, geen basis om vanuit te bouwen — maar het
+bevat wél twee patronen die het overwegen waard zijn voor de "registreren"
+-kern hierboven: (1) een generieke transcript-parser die zowel
+markdown-stijl exports als losse JSON-vormen (`{role,content}`,
+`{messages:[...]}`, etc.) herkent, breder dan de huidige browser-extensie
+die alleen Claude/ChatGPT/Gemini dekt; (2) een eigen MCP-server
+(`search_archive`/`semantic_search`/`list_recent_chats`/`list_tags`) als
+voorbeeld van hoe een ruw archief bevraagbaar wordt zonder de data naar
+Hindsight te hoeven duwen.
